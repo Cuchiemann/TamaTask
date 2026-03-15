@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/Equipo/AppData/Roaming/Claude/local-agent-mode-sessions/skills-plugin/2659cdc8-5608-478e-b65f-7731604b0936/2a799724-da91-49b3-a50d-a40400ce4207/skills/docx/**)",
+      "Bash(pandoc \"C:\\\\Users\\\\Equipo\\\\Downloads\\\\TamaTask_Planificacion.docx\" -o /tmp/tamatask_plan.md)",
+      "Bash(python scripts/office/unpack.py \"C:\\\\Users\\\\Equipo\\\\Downloads\\\\TamaTask_Planificacion.docx\" /tmp/tamatask_unpacked/)",
+      "Bash(find C:UsersEquipoAndroidStudioProjectsTamaTask/app/src -type f -name *.kt -o -name *.xml)",
+      "Bash(pip install:*)",
+      "Bash(pandoc \"C:\\\\Users\\\\Equipo\\\\Downloads\\\\TamaTask_Planificacion.docx\" -o \"C:\\\\Users\\\\Equipo\\\\Downloads\\\\TamaTask_Planificacion.md\")",
+      "Read(//c/Users/Equipo/Downloads/**)",
+      "Bash(python scripts/office/unpack.py \"C:\\\\Users\\\\Equipo\\\\Downloads\\\\TamaTask_Planificacion.docx\" \"C:\\\\Users\\\\Equipo\\\\Downloads\\\\TamaTask_unpacked/\")",
+      "Bash(find /c/Users/Equipo/AndroidStudioProjects/TamaTask -type f \\\\\\(-name *.toml -o -name libs.versions.toml \\\\\\))",
+      "Bash(curl -L -o \"C:/Users/Equipo/AndroidStudioProjects/TamaTask/app/src/main/res/font/press_start_2p.ttf\" \"https://github.com/google/fonts/raw/main/ofl/pressstart2p/PressStart2P-Regular.ttf\")",
+      "Bash(./gradlew assembleDebug)",
+      "Bash(./gradlew :app:compileDebugKotlin)",
+      "Bash(./gradlew --version)",
+      "Bash(java -version)",
+      "Read(//c/Program Files/Android/Android Studio/jbr/bin/**)",
+      "Read(//c/Program Files/Android/Android Studio/jre/bin/**)",
+      "Read(//c/Program Files/**)",
+      "Bash(export JAVA_HOME=\"C:\\\\Program Files\\\\Android\\\\Android Studio\\\\jbr\")",
+      "Bash(unzip -l \"C:\\\\Users\\\\Equipo\\\\Downloads\\\\animation-pack-spritesheets.zip\")",
+      "Bash(unzip -o \"animation-pack-spritesheets.zip\" -d \"animation-pack-extracted\")",
+      "Bash(py --version)",
+      "Bash(python3 -c \":*)",
+      "Bash(python -c \":*)"
+    ]
+  }
+}
