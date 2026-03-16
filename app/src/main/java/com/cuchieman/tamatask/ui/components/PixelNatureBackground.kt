@@ -17,10 +17,18 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Fill
+import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.imageResource
+import com.cuchieman.tamatask.R
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -56,15 +64,17 @@ private val MangroveMid = Color(0xFF2D4F2D)
 private val MangroveLight = Color(0xFF3A6030)
 private val MangroveRoot = Color(0xFF3A2E1E)
 
-// Water
-private val WaterDeepest = Color(0xFF1A4A40)
-private val WaterDeep = Color(0xFF235A4E)
-private val WaterMid = Color(0xFF2E6B5A)
-private val WaterLight = Color(0xFF3A8070)
-private val WaterSurface = Color(0xFF4A9585)
-private val WaveCrest = Color(0xFF6BB8A8)
+// Water — mangrove swamp palette: murky greens/teals, dark far → light near shore
+private val WaterBand1 = Color(0xFF1A3D35)   // darkest — far horizon
+private val WaterBand2 = Color(0xFF1F4A40)
+private val WaterBand3 = Color(0xFF24554A)
+private val WaterBand4 = Color(0xFF2A6155)
+private val WaterBand5 = Color(0xFF316D5F)
+private val WaterBand6 = Color(0xFF3A7A6A)
+private val WaterBand7 = Color(0xFF448876)
+private val WaterBand8 = Color(0xFF509682)
+private val WaterBand9 = Color(0xFF5EA48F)   // lightest — near shore
 private val WaveFoam = Color(0xFFB0DDD5)
-private val WaterReflect = Color(0xFF80C8B8)
 
 // Lily pads
 private val LilyPadDark = Color(0xFF2D5A2D)
@@ -140,12 +150,10 @@ private data class DragonflyData(
 )
 
 private data class MangroveTreeData(
-    val xFraction: Float,   // position in panorama (0..1)
-    val trunkHeight: Int,   // trunk height multiplier
-    val canopyRadius: Float, // canopy size multiplier
-    val rootCount: Int,      // how many visible roots
-    val leanAngle: Float,   // slight lean
-    val hasVines: Boolean
+    val xFraction: Float,    // position in panorama (0..1)
+    val spriteIndex: Int,    // which sprite (0, 1, or 2)
+    val scale: Float,        // display scale multiplier
+    val flipH: Boolean = false // mirror horizontally for variety
 )
 
 private data class VegetationData(
@@ -157,12 +165,26 @@ private data class VegetationData(
 
 // ── Main composable ──────────────────────────────────────────
 
+/**
+ * @param foregroundOnly when true, only draws vegetation that is below [dinoFeetScreenFrac].
+ *        Use this as an overlay on top of the dino sprite for depth sorting.
+ * @param dinoFeetScreenFrac dino feet position as fraction of screen height (0..1).
+ */
 @Composable
 fun PixelNatureBackground(
     modifier: Modifier = Modifier,
-    scrollOffset: Float = 0.5f  // 0..1 — position in panorama
+    scrollOffset: Float = 0.5f,  // 0..1 — position in panorama
+    foregroundOnly: Boolean = false,
+    dinoFeetScreenFrac: Float = 1f
 ) {
     val density = LocalDensity.current.density
+
+    // Load mangrove tree sprites
+    val treeSprites = listOf(
+        ImageBitmap.imageResource(R.drawable.mangrove_tree_1),
+        ImageBitmap.imageResource(R.drawable.mangrove_tree_2),
+        ImageBitmap.imageResource(R.drawable.mangrove_tree_3)
+    )
 
     val infiniteTransition = rememberInfiniteTransition(label = "swamp")
 
@@ -202,7 +224,7 @@ fun PixelNatureBackground(
     val dfTime by infiniteTransition.animateFloat(
         initialValue = 0f, targetValue = 10f,
         animationSpec = infiniteRepeatable(
-            tween(25_000, easing = LinearEasing), RepeatMode.Restart
+            tween(15_625, easing = LinearEasing), RepeatMode.Restart
         ), label = "df_time"
     )
 
@@ -253,14 +275,17 @@ fun PixelNatureBackground(
 
     val lilyPads = remember {
         listOf(
-            LilyPadData(0.05f, 0.25f, 1.2f, true, 0f),
-            LilyPadData(0.18f, 0.45f, 0.9f, false, 1.4f),
-            LilyPadData(0.32f, 0.30f, 1.0f, true, 2.8f),
-            LilyPadData(0.46f, 0.55f, 0.8f, false, 0.7f),
-            LilyPadData(0.58f, 0.20f, 1.1f, true, 3.5f),
-            LilyPadData(0.72f, 0.40f, 1.0f, true, 5.0f),
-            LilyPadData(0.85f, 0.35f, 0.9f, false, 2.3f),
-            LilyPadData(0.95f, 0.50f, 0.8f, true, 1.6f)
+            // More dispersed: spread across panorama with varied depths & sizes
+            LilyPadData(0.03f, 0.15f, 1.0f, true, 0f),
+            LilyPadData(0.12f, 0.55f, 0.7f, false, 1.4f),
+            LilyPadData(0.28f, 0.30f, 1.1f, true, 2.8f),
+            LilyPadData(0.38f, 0.70f, 0.6f, false, 4.2f),
+            LilyPadData(0.52f, 0.18f, 0.9f, true, 3.5f),
+            LilyPadData(0.65f, 0.48f, 1.0f, false, 5.0f),
+            LilyPadData(0.78f, 0.25f, 0.8f, true, 2.3f),
+            LilyPadData(0.90f, 0.60f, 0.7f, false, 1.6f),
+            LilyPadData(0.08f, 0.68f, 0.6f, false, 5.5f),
+            LilyPadData(0.45f, 0.40f, 0.8f, true, 0.9f)
         )
     }
 
@@ -281,24 +306,27 @@ fun PixelNatureBackground(
     // Mangrove trees — forest on far shore (reduced from 26→18 for perf)
     val mangroveTrees = remember {
         listOf(
-            MangroveTreeData(0.02f, 45, 4.8f, 6, -0.10f, true),
-            MangroveTreeData(0.08f, 51, 5.7f, 7, -0.04f, true),
-            MangroveTreeData(0.14f, 36, 3.9f, 5, 0.06f, false),
-            MangroveTreeData(0.20f, 48, 5.2f, 7, -0.07f, true),
-            MangroveTreeData(0.27f, 54, 6.0f, 6, -0.05f, true),
-            MangroveTreeData(0.33f, 33, 3.6f, 5, 0.07f, false),
-            MangroveTreeData(0.39f, 45, 5.0f, 6, -0.06f, true),
-            MangroveTreeData(0.46f, 52, 5.8f, 7, -0.03f, true),
-            MangroveTreeData(0.52f, 39, 4.0f, 5, 0.05f, false),
-            MangroveTreeData(0.58f, 51, 5.5f, 7, -0.04f, true),
-            MangroveTreeData(0.64f, 34, 3.8f, 5, 0.07f, false),
-            MangroveTreeData(0.71f, 54, 6.0f, 7, -0.05f, true),
-            MangroveTreeData(0.77f, 40, 4.3f, 5, 0.04f, false),
-            MangroveTreeData(0.83f, 49, 5.4f, 7, -0.07f, true),
-            MangroveTreeData(0.89f, 36, 3.8f, 5, 0.06f, false),
-            MangroveTreeData(0.95f, 46, 5.1f, 6, -0.06f, true),
-            MangroveTreeData(0.11f, 42, 4.5f, 6, 0.03f, true),
-            MangroveTreeData(0.67f, 37, 3.9f, 5, 0.03f, true)
+            // Large trees (back layer) — scale ~1.1-1.2
+            MangroveTreeData(0.04f, 0, 1.15f),
+            MangroveTreeData(0.18f, 1, 1.10f, flipH = true),
+            MangroveTreeData(0.32f, 2, 1.20f),
+            MangroveTreeData(0.48f, 0, 1.12f, flipH = true),
+            MangroveTreeData(0.62f, 1, 1.18f),
+            MangroveTreeData(0.76f, 2, 1.10f, flipH = true),
+            MangroveTreeData(0.90f, 0, 1.15f),
+            // Medium trees (mid layer) — scale ~0.85-1.0
+            MangroveTreeData(0.10f, 2, 0.95f, flipH = true),
+            MangroveTreeData(0.25f, 0, 0.90f),
+            MangroveTreeData(0.40f, 1, 0.88f, flipH = true),
+            MangroveTreeData(0.55f, 2, 0.92f),
+            MangroveTreeData(0.70f, 0, 0.85f, flipH = true),
+            MangroveTreeData(0.85f, 1, 0.90f),
+            // Small trees (front) — scale ~0.65-0.80
+            MangroveTreeData(0.15f, 1, 0.75f),
+            MangroveTreeData(0.37f, 2, 0.70f, flipH = true),
+            MangroveTreeData(0.58f, 0, 0.78f),
+            MangroveTreeData(0.80f, 1, 0.65f, flipH = true),
+            MangroveTreeData(0.95f, 2, 0.72f)
         )
     }
 
@@ -354,6 +382,10 @@ fun PixelNatureBackground(
         val waterBottom = h * 0.78f
         val shoreTop = h * 0.75f
 
+        // ── Dino feet Y in screen pixels for depth sorting ──
+        val dinoFeetPx = dinoFeetScreenFrac * h
+
+        if (!foregroundOnly) {
         // ══════════════════════════════════════════
         // 1. SKY (gradient — smooth, device resolution)
         // ══════════════════════════════════════════
@@ -387,15 +419,39 @@ fun PixelNatureBackground(
         // ══════════════════════════════════════════
         // 4b. MANGROVE TREES on far shore (above water)
         // ══════════════════════════════════════════
-        mangroveTrees.forEach { tree ->
+        // Draw trees sorted by scale (largest/farthest first)
+        // Each sprite pixel = blk screen pixels (matches background pixel art)
+        mangroveTrees.sortedByDescending { it.scale }.forEach { tree ->
             val worldX = tree.xFraction * panoramaWidth
             val screenX = worldX - scrollPx
-            if (screenX > -blk * 20 && screenX < w + blk * 20) {
-                drawMangroveTree(
-                    screenX, waterTop + blk * 2, blk,
-                    tree.trunkHeight, tree.canopyRadius,
-                    tree.rootCount, tree.leanAngle, tree.hasVines
-                )
+            if (screenX > -blk * 80 && screenX < w + blk * 80) {
+                val sprite = treeSprites[tree.spriteIndex]
+                val pxSize = blk * tree.scale  // each sprite pixel = this many screen px
+                val drawW = sprite.width * pxSize
+                val drawH = sprite.height * pxSize
+                val drawX = screenX - drawW / 2
+                // Anchor: roots (bottom ~15% of sprite) sit at water line
+                val drawY = waterTop - drawH * 0.82f
+
+                if (tree.flipH) {
+                    withTransform({
+                        scale(scaleX = -1f, scaleY = 1f, pivot = Offset(screenX, drawY + drawH / 2))
+                    }) {
+                        drawImage(
+                            image = sprite,
+                            dstOffset = IntOffset(drawX.toInt(), drawY.toInt()),
+                            dstSize = IntSize(drawW.toInt(), drawH.toInt()),
+                            filterQuality = FilterQuality.None
+                        )
+                    }
+                } else {
+                    drawImage(
+                        image = sprite,
+                        dstOffset = IntOffset(drawX.toInt(), drawY.toInt()),
+                        dstSize = IntSize(drawW.toInt(), drawH.toInt()),
+                        filterQuality = FilterQuality.None
+                    )
+                }
             }
         }
 
@@ -415,8 +471,7 @@ fun PixelNatureBackground(
             }
         }
 
-        // Wave overlay (foam lines on top of water)
-        drawWaveFoamLines(waterTop, waterBottom, w, wave1, wave2, blk)
+        // (foam lines removed for cleaner water look)
 
         // ══════════════════════════════════════════
         // 6. REEDS along the shore
@@ -439,12 +494,14 @@ fun PixelNatureBackground(
         // 7. SHORE / TERRAIN
         // ══════════════════════════════════════════
         drawShoreTerrain(shoreTop, h, w, blk, scrollPx, panoramaWidth)
+        drawShoreDetails(shoreTop, h, w, blk, scrollPx, panoramaWidth)
+        } // end if (!foregroundOnly)
 
         // ══════════════════════════════════════════
         // 7b. VEGETATION covering terrain (organic scatter)
+        //     Split by depth: behind-dino vs in-front-of-dino
         // ══════════════════════════════════════════
         val terrainH = h - shoreTop
-        // 3 staggered rows for depth, covering all terrain including bottom
         val vegRows = listOf(0.08f, 0.40f, 0.75f)
         vegRows.forEachIndexed { rowIdx, rowFrac ->
             val rowBaseY = shoreTop + terrainH * rowFrac
@@ -454,22 +511,25 @@ fun PixelNatureBackground(
                 val rowOffsetX = rowIdx * panoramaWidth * 0.12f
                 val screenX = (worldX + rowOffsetX) % panoramaWidth - scrollPx
                 if (screenX > -blk * 15 && screenX < w + blk * 15) {
-                    // Each item gets its own Y jitter based on its position
                     val yJitter = sin(worldX * 0.023f + veg.phase) * terrainH * 0.15f
-                    // Clamp so vegetation never goes above shore into the water
                     val vegY = (rowBaseY + yJitter).coerceAtLeast(shoreTop + blk * 3)
-                    val sz = blk * veg.sizeMul * perspScale
-                    val windySway = reedSway + windStrength * 1.0f
-                    when (veg.type) {
-                        0 -> drawFern(screenX, vegY, sz, windySway, veg.phase)
-                        1 -> drawBush(screenX, vegY, sz)
-                        2 -> drawGrassTuft(screenX, vegY, sz, windySway, veg.phase)
-                        4 -> drawMossRock(screenX, vegY, sz)
+                    // Depth test: vegetation below dino feet = foreground
+                    val isForeground = vegY > dinoFeetPx
+                    if (isForeground == foregroundOnly) {
+                        val sz = blk * veg.sizeMul * perspScale
+                        val windySway = reedSway + windStrength * 1.0f
+                        when (veg.type) {
+                            0 -> drawFern(screenX, vegY, sz, windySway, veg.phase)
+                            1 -> drawBush(screenX, vegY, sz)
+                            2 -> drawGrassTuft(screenX, vegY, sz, windySway, veg.phase)
+                            4 -> drawMossRock(screenX, vegY, sz)
+                        }
                     }
                 }
             }
         }
 
+        if (!foregroundOnly) {
         // ══════════════════════════════════════════
         // 8. DRAGONFLIES
         // ══════════════════════════════════════════
@@ -514,6 +574,7 @@ fun PixelNatureBackground(
                 )
             }
         }
+        } // end if (!foregroundOnly) for dragonflies/wind
     }
 }
 
@@ -633,62 +694,80 @@ private fun DrawScope.drawWaterBody(
 ) {
     val waterHeight = bottomY - topY
 
-    // Base water gradient
+    // 9 color bands with wavy irregular edges between them
+    val bandColors = listOf(
+        WaterBand1, WaterBand2, WaterBand3, WaterBand4, WaterBand5,
+        WaterBand6, WaterBand7, WaterBand8, WaterBand9
+    )
+    val bandCount = bandColors.size
+
+    // First fill entire water area with darkest color
     drawRect(
-        brush = Brush.verticalGradient(
-            colors = listOf(WaterSurface, WaterLight, WaterMid, WaterDeep, WaterDeepest),
-            startY = topY,
-            endY = bottomY
-        ),
+        color = bandColors[0],
         topLeft = Offset(0f, topY),
         size = Size(screenWidth, waterHeight)
     )
 
-    // Wave bands — sinusoidal color bands that move
-    val bandCount = 5
-    for (band in 0 until bandCount) {
+    // Draw each band from top to bottom with a wavy top edge
+    val waveStep = 6f
+    val steps = (screenWidth / waveStep).toInt() + 1
+
+    for (band in 1 until bandCount) {
         val bandFrac = band.toFloat() / bandCount
-        val bandY = topY + waterHeight * bandFrac
-        val bandH = waterHeight / bandCount
+        val baseY = topY + waterHeight * bandFrac
 
-        val wavePath = Path()
-        wavePath.moveTo(-10f, bandY + bandH)
+        val bandPath = Path()
+        bandPath.moveTo(-10f, bottomY + 10f)  // bottom-left
 
-        val waveStep = 8f  // coarser for performance (was 3f)
-        val steps = (screenWidth / waveStep).toInt() + 1
+        // Wavy top edge — each band has unique wave pattern
+        // Use multiple frequencies with different seeds per band for variety
+        val seed1 = band * 1.7f + 0.3f
+        val seed2 = band * 2.3f + 1.1f
+        val seed3 = band * 0.7f + 2.5f
+        // Amplitude: small irregular waves (like the reference pixel art)
+        val amp1 = waterHeight * 0.012f * (1f + (band % 3) * 0.3f)
+        val amp2 = waterHeight * 0.007f * (1f + (band % 2) * 0.4f)
+        val amp3 = waterHeight * 0.004f
+
+        // Build the wavy edge from right to left (so path fills correctly)
+        val edgePoints = mutableListOf<Offset>()
         for (i in 0..steps) {
             val x = i * waveStep
-            val waveY = sin(x * 0.02f + wave1 + band * 0.8f) * bandH * 0.3f +
-                    sin(x * 0.035f + wave2 + band * 0.5f) * bandH * 0.15f
-            wavePath.lineTo(x, bandY + waveY)
+            val wy = sin(x * 0.008f + seed1 + wave1 * 0.15f) * amp1 +
+                    sin(x * 0.019f + seed2 + wave2 * 0.1f) * amp2 +
+                    sin(x * 0.037f + seed3) * amp3
+            edgePoints.add(Offset(x, baseY + wy))
         }
-        wavePath.lineTo(screenWidth + 10f, bandY + bandH)
-        wavePath.close()
 
-        val bandColor = when {
-            bandFrac < 0.15f -> WaterReflect.copy(alpha = 0.15f)
-            bandFrac < 0.3f -> WaveCrest.copy(alpha = 0.10f)
-            bandFrac < 0.6f -> WaterLight.copy(alpha = 0.08f)
-            else -> WaterDeep.copy(alpha = 0.06f)
+        // Build path: bottom → wavy top edge → close
+        bandPath.moveTo(-10f, bottomY + 10f)
+        bandPath.lineTo(-10f, edgePoints.first().y)
+        for (pt in edgePoints) {
+            bandPath.lineTo(pt.x, pt.y)
         }
-        drawPath(wavePath, color = bandColor)
+        bandPath.lineTo(screenWidth + 10f, edgePoints.last().y)
+        bandPath.lineTo(screenWidth + 10f, bottomY + 10f)
+        bandPath.close()
+
+        drawPath(bandPath, color = bandColors[band])
     }
 
-    // Shimmer highlights (moving light reflections)
-    val shimmerStep = 12f  // coarser for performance (was 4f)
-    val shimmerSteps = (screenWidth / shimmerStep).toInt()
-    for (i in 0..shimmerSteps) {
-        val x = i * shimmerStep
-        val sparkle = sin(x * 0.08f + shimmer) * cos(x * 0.05f + shimmer * 0.5f)
-        if (sparkle > 0.6f) {
-            val sy = topY + waterHeight * 0.1f + sin(x * 0.03f + wave1) * waterHeight * 0.08f
-            val alpha = (sparkle - 0.6f) * 0.6f
-            drawRect(
-                color = WaveFoam.copy(alpha = alpha),
-                topLeft = Offset(x, sy),
-                size = Size(3f, 1.5f)
-            )
-        }
+    // Subtle dark mottling/texture spots scattered across water
+    // Gives the murky mangrove water character
+    val golden = 0.618033f
+    var acc = 0.11f
+    for (i in 0 until 25) {
+        acc = (acc + golden) % 1f
+        val spotX = acc * screenWidth
+        val spotYFrac = ((i * 7 + 3) % 13) / 13f
+        val spotY = topY + waterHeight * spotYFrac
+        val spotR = waterHeight * (0.015f + (i % 4) * 0.008f)
+        val spotAlpha = 0.04f + (i % 3) * 0.02f
+        drawCircle(
+            color = WaterBand1.copy(alpha = spotAlpha),
+            radius = spotR,
+            center = Offset(spotX, spotY)
+        )
     }
 }
 
@@ -700,33 +779,45 @@ private fun DrawScope.drawWaveFoamLines(
 ) {
     val waterHeight = bottomY - topY
 
-    // 2 foam lines at different depths (was 3)
-    for (line in 0..1) {
-        val lineFrac = 0.05f + line * 0.25f
-        val baseY = topY + waterHeight * lineFrac
+    // Scattered short foam dashes instead of continuous lines
+    // Use golden ratio distribution for organic spacing
+    val golden = 0.618033f
+    var acc = 0.137f
 
+    // ~30 small foam segments scattered across the water
+    for (i in 0 until 30) {
+        acc = (acc + golden) % 1f
+        val xFrac = acc
+        val yBand = (i * 7 + 3) % 5  // 0..4 distributes across water depth
+        val yFrac = 0.05f + yBand * 0.18f  // 0.05..0.77
+
+        val baseX = xFrac * screenWidth
+        val baseY = topY + waterHeight * yFrac
+
+        // Wave offset for animation
+        val wy = sin(baseX * 0.015f + wave1 + i * 0.7f) * blk * 1.0f +
+                sin(baseX * 0.03f + wave2 + i * 0.4f) * blk * 0.5f
+
+        // Short dash: 3-7 blk wide, slightly wavy
+        val dashLen = blk * (3f + (i * 5 + 2) % 5)
+        val dashY = baseY + wy
+
+        // Draw as a small wavy path (3-4 points)
         val foamPath = Path()
-        var started = false
-        val foamStep = 6f  // coarser for performance (was 2f)
-        val steps = (screenWidth / foamStep).toInt() + 1
-
-        for (i in 0..steps) {
-            val x = i * foamStep
-            val wy = sin(x * 0.018f + wave1 + line * 1.2f) * blk * 1.5f +
-                    sin(x * 0.04f + wave2 + line * 0.7f) * blk * 0.8f
-            if (!started) {
-                foamPath.moveTo(x, baseY + wy)
-                started = true
-            } else {
-                foamPath.lineTo(x, baseY + wy)
-            }
+        foamPath.moveTo(baseX, dashY)
+        val segs = 3
+        for (s in 1..segs) {
+            val sx = baseX + dashLen * s / segs
+            val sy = dashY + sin(sx * 0.05f + wave1 * 2f) * blk * 0.4f
+            foamPath.lineTo(sx, sy)
         }
 
-        // Draw as a thin line
+        val alpha = 0.12f + sin(wave1 + i * 1.3f) * 0.06f  // subtle pulsing
+        val thickness = blk * (0.3f + (i % 3) * 0.1f)
         drawPath(
             foamPath,
-            color = WaveFoam.copy(alpha = 0.2f - line * 0.05f),
-            style = androidx.compose.ui.graphics.drawscope.Stroke(width = blk * 0.5f)
+            color = WaveFoam.copy(alpha = alpha.coerceIn(0.06f, 0.22f)),
+            style = androidx.compose.ui.graphics.drawscope.Stroke(width = thickness)
         )
     }
 }
@@ -736,36 +827,50 @@ private fun DrawScope.drawWaveFoamLines(
 private fun DrawScope.drawLilyPad(
     x: Float, y: Float, radius: Float, hasFlower: Boolean
 ) {
-    // Oval pad
-    val padW = radius * 4
-    val padH = radius * 2.5f
-    drawOval(
-        color = LilyPadDark,
-        topLeft = Offset(x - padW / 2, y - padH / 2),
-        size = Size(padW, padH)
-    )
-    // Light center
-    drawOval(
-        color = LilyPadLight.copy(alpha = 0.6f),
-        topLeft = Offset(x - padW * 0.3f, y - padH * 0.3f),
-        size = Size(padW * 0.6f, padH * 0.6f)
-    )
-    // Notch (small dark wedge) — draw a small rect to suggest the cut
-    drawRect(
-        color = WaterMid,
-        topLeft = Offset(x - radius * 0.3f, y - padH / 2),
-        size = Size(radius * 0.6f, padH * 0.3f)
-    )
+    val b = radius  // block size for pixel art
+
+    // Pixel art lily pad — flat oval shape with notch
+    // Row pattern (relative to center): wider in middle, narrow at edges
+    //   Row -2:      ##__##
+    //   Row -1:     ########
+    //   Row  0:     ####_###   (notch on right side)
+    //   Row +1:      ######
+    //   Row +2:       ####
+
+    // Dark outline / base
+    px(x - b * 2, y - b, b, LilyPadDark)
+    px(x - b, y - b, b, LilyPadDark)
+    px(x + b, y - b, b, LilyPadDark)
+    px(x + b * 2, y - b, b, LilyPadDark)
+
+    px(x - b * 3, y, b, LilyPadDark)
+    px(x - b * 2, y, b, LilyPadLight)
+    px(x - b, y, b, LilyPadLight)
+    px(x, y, b, LilyPadLight)
+    px(x + b, y, b, LilyPadDark)
+    px(x + b * 2, y, b, LilyPadDark)
+    px(x + b * 3, y, b, LilyPadDark)
+
+    // Center rows with notch
+    px(x - b * 3, y + b, b, LilyPadDark)
+    px(x - b * 2, y + b, b, LilyPadLight)
+    px(x - b, y + b, b, LilyPadLight)
+    // notch gap at x, y+b
+    px(x + b, y + b, b, LilyPadLight)
+    px(x + b * 2, y + b, b, LilyPadDark)
+
+    px(x - b * 2, y + b * 2, b, LilyPadDark)
+    px(x - b, y + b * 2, b, LilyPadDark)
+    px(x, y + b * 2, b, LilyPadDark)
+    px(x + b, y + b * 2, b, LilyPadDark)
 
     if (hasFlower) {
-        // Flower petals
-        val fr = radius * 1.2f
-        val fy = y - padH / 2 - fr
-        drawCircle(color = LilyFlower.copy(alpha = 0.8f), radius = fr, center = Offset(x - fr, fy))
-        drawCircle(color = LilyFlower.copy(alpha = 0.7f), radius = fr * 0.8f, center = Offset(x + fr, fy))
-        drawCircle(color = LilyFlower, radius = fr * 0.9f, center = Offset(x, fy - fr * 0.3f))
-        // Center
-        drawCircle(color = LilyCenter, radius = fr * 0.4f, center = Offset(x, fy))
+        // Small pixel flower on top of pad
+        val fy = y - b * 2
+        px(x, fy, b, LilyFlower)
+        px(x - b, fy + b * 0.5f, b * 0.8f, LilyFlower.copy(alpha = 0.8f))
+        px(x + b, fy + b * 0.5f, b * 0.8f, LilyFlower.copy(alpha = 0.7f))
+        px(x, fy + b, b * 0.6f, LilyCenter) // center dot
     }
 }
 
@@ -857,65 +962,85 @@ private fun DrawScope.drawShoreTerrain(
     // Overwrite water peek above shore with shore edge shape
     drawPath(edgePath, color = ShoreMid)
 
-    // Grass tufts along the shore edge
-    val tuftsStep = blk * 6  // coarser (was blk*4)
-    val tufts = (screenWidth / tuftsStep).toInt() + 1
-    for (i in 0..tufts) {
-        val x = i * tuftsStep
-        val worldX = x + scrollPx
-        val edgeY = topY +
-                sin(worldX * 0.012f) * blk * 2 +
-                sin(worldX * 0.025f + 1.5f) * blk
-        // Small grass blades
-        val grassHash = ((worldX * 0.1f).toInt() * 7 + 3) % 5
-        if (grassHash < 3) {
-            for (g in 0..grassHash) {
-                px(x + g * blk * 0.8f, edgeY - blk * (grassHash - g + 1), blk, ShoreGrass.copy(alpha = 0.7f))
+    // (grass tufts along shore edge removed)
+}
+
+// Shore detail items — fixed world positions, stable when scrolling
+private data class ShoreDetail(
+    val xFraction: Float,  // 0..1 in panorama
+    val yOffset: Float,    // blk multiplier from shore top
+    val size: Float,       // blk multiplier
+    val type: Int          // 0=mud patch, 1=puddle, 2=stone
+)
+
+private val shoreDetails: List<ShoreDetail> = run {
+    val list = mutableListOf<ShoreDetail>()
+    val golden = 0.618033f
+    var acc = 0.09f
+    for (i in 0 until 35) {
+        acc = (acc + golden) % 1f
+        val yOff = 1.5f + (i * 7 + 2) % 8 * 1.2f  // 1.5..11.1 blk from shore top
+        val sz = 2f + (i * 5 + 3) % 4 * 0.7f       // 2..4.1
+        val type = when {
+            i % 5 == 0 -> 2  // stone (20%)
+            i % 3 == 0 -> 1  // puddle (27%)
+            else -> 0        // mud patch (53%)
+        }
+        list.add(ShoreDetail(acc, yOff, sz, type))
+    }
+    list
+}
+
+private fun DrawScope.drawShoreDetails(
+    topY: Float, screenHeight: Float, screenWidth: Float,
+    blk: Float, scrollPx: Float, panoramaWidth: Float
+) {
+    for (detail in shoreDetails) {
+        val worldX = detail.xFraction * panoramaWidth
+        val screenX = worldX - scrollPx
+        if (screenX < -blk * 8 || screenX > screenWidth + blk * 8) continue
+
+        val py = topY + blk * detail.yOffset
+        if (py + blk * 3 > screenHeight) continue
+        val sz = blk * detail.size
+
+        when (detail.type) {
+            0 -> {
+                // Mud patch
+                drawOval(
+                    color = MudWet.copy(alpha = 0.4f),
+                    topLeft = Offset(screenX, py),
+                    size = Size(sz, sz * 0.5f)
+                )
             }
-        }
-    }
-
-    // Wet mud patches near water
-    val patchStep = blk * 8
-    val patches = (screenWidth / patchStep).toInt() + 1
-    for (i in 0..patches) {
-        val x = i * patchStep
-        val worldX = x + scrollPx
-        val hash = ((worldX * 0.07f).toInt() * 13 + 5) % 7
-        if (hash < 3) {
-            val patchW = blk * (2 + hash)
-            val patchH = blk * 1.5f
-            val py = topY + blk * 2 + (hash % 2) * blk * 3
-            drawOval(
-                color = MudWet.copy(alpha = 0.4f),
-                topLeft = Offset(x, py),
-                size = Size(patchW, patchH)
-            )
-        }
-    }
-
-    // Puddles (reflective water patches in mud)
-    val puddleStep = blk * 12
-    val puddles = (screenWidth / puddleStep).toInt() + 1
-    for (i in 0..puddles) {
-        val x = i * puddleStep + blk * 3
-        val worldX = x + scrollPx
-        val hash = ((worldX * 0.05f).toInt() * 11 + 7) % 9
-        if (hash < 3) {
-            val pw = blk * (3 + hash)
-            val ph = blk * 1.5f
-            val py = topY + blk * 6 + hash * blk * 2
-            if (py + ph < screenHeight) {
+            1 -> {
+                // Puddle
+                val pw = sz * 1.2f
+                val ph = sz * 0.5f
                 drawOval(
                     color = PuddleColor.copy(alpha = 0.35f),
-                    topLeft = Offset(x, py),
+                    topLeft = Offset(screenX, py),
                     size = Size(pw, ph)
                 )
-                // Tiny reflection highlight
                 drawOval(
                     color = WaveFoam.copy(alpha = 0.1f),
-                    topLeft = Offset(x + pw * 0.2f, py + ph * 0.1f),
+                    topLeft = Offset(screenX + pw * 0.2f, py + ph * 0.1f),
                     size = Size(pw * 0.4f, ph * 0.3f)
+                )
+            }
+            2 -> {
+                // Stone — small oval with highlight
+                val sw = sz * 0.8f
+                val sh = sz * 0.5f
+                drawOval(
+                    color = Color(0xFF5A5A4A),
+                    topLeft = Offset(screenX, py),
+                    size = Size(sw, sh)
+                )
+                drawOval(
+                    color = Color(0xFF7A7A6A).copy(alpha = 0.5f),
+                    topLeft = Offset(screenX + sw * 0.15f, py + sh * 0.1f),
+                    size = Size(sw * 0.4f, sh * 0.35f)
                 )
             }
         }
@@ -924,230 +1049,7 @@ private fun DrawScope.drawShoreTerrain(
 
 // ── Mangrove tree (individual, foreground) — thick trunk, forking branches, big dome canopy ──
 
-private fun DrawScope.drawMangroveTree(
-    x: Float, baseY: Float, blk: Float,
-    trunkHeight: Int, canopyMul: Float,
-    rootCount: Int, lean: Float, hasVines: Boolean
-) {
-    val trunkW = blk * 3f  // thick trunk
-    val groundY = baseY + blk * 2  // roots spread on the ground, above water
-
-    // ── STILT ROOTS — prominent arching roots, above water ──
-    for (r in 0 until rootCount) {
-        val spread = (r - rootCount / 2f) / rootCount.coerceAtLeast(1)
-        val rootSpread = spread * blk * (16 + rootCount)
-        val rootThickness = blk * (1.5f - kotlin.math.abs(spread) * 0.4f)
-
-        val rootFootX = x + rootSpread
-        val rootFootY = groundY  // feet on shore, not in water
-        val rootTopX = x + rootSpread * 0.25f
-        val rootTopY = baseY - blk * 3
-
-        val rootPath = Path()
-        rootPath.moveTo(rootFootX, rootFootY)
-        val archHeight = blk * (4 + (r % 3))
-        rootPath.cubicTo(
-            rootFootX + rootSpread * 0.05f, rootFootY - archHeight,
-            rootTopX + rootSpread * 0.15f, rootTopY + blk * 5,
-            rootTopX, rootTopY
-        )
-        drawPath(
-            rootPath,
-            color = if (r % 2 == 0) TrunkDark else TrunkMid,
-            style = androidx.compose.ui.graphics.drawscope.Stroke(width = rootThickness)
-        )
-
-        // Secondary thin roots branching off (every 3rd for perf)
-        if (r % 3 == 0) {
-            val branchX = rootFootX + rootSpread * 0.12f
-            val branchY = rootFootY - archHeight * 0.35f
-            val thinRoot = Path()
-            thinRoot.moveTo(branchX, branchY)
-            thinRoot.cubicTo(
-                branchX + rootSpread * 0.25f, branchY + blk * 2,
-                branchX + rootSpread * 0.35f, groundY - blk,
-                branchX + rootSpread * 0.30f, groundY
-            )
-            drawPath(
-                thinRoot,
-                color = TrunkDark.copy(alpha = 0.5f),
-                style = androidx.compose.ui.graphics.drawscope.Stroke(width = rootThickness * 0.35f)
-            )
-        }
-    }
-
-    // ── MAIN TRUNK — thick, wider at base, narrows toward fork ──
-    val totalH = trunkHeight * blk
-    val forkFrac = 0.38f  // fork at ~38% height
-    val forkY = baseY - totalH * forkFrac
-    val forkX = x + lean * totalH * forkFrac
-
-    // Trunk shape: wide at base, narrows at fork
-    val baseHalfW = trunkW * 0.7f
-    val forkHalfW = trunkW * 0.35f
-    val lowerTrunk = Path()
-    lowerTrunk.moveTo(x - baseHalfW, baseY)
-    lowerTrunk.cubicTo(
-        x - baseHalfW * 0.9f, baseY - totalH * 0.15f,
-        forkX - forkHalfW * 1.3f, forkY + totalH * 0.08f,
-        forkX - forkHalfW, forkY
-    )
-    lowerTrunk.lineTo(forkX + forkHalfW, forkY)
-    lowerTrunk.cubicTo(
-        forkX + forkHalfW * 1.3f, forkY + totalH * 0.08f,
-        x + baseHalfW * 0.9f, baseY - totalH * 0.15f,
-        x + baseHalfW, baseY
-    )
-    lowerTrunk.close()
-    drawPath(lowerTrunk, color = TrunkMid)
-    // Light shading on trunk
-    drawPath(
-        lowerTrunk,
-        brush = Brush.horizontalGradient(
-            colors = listOf(TrunkDark.copy(alpha = 0.3f), Color.Transparent, TrunkLight.copy(alpha = 0.25f)),
-            startX = x - baseHalfW, endX = x + baseHalfW
-        )
-    )
-
-    // ── MAIN BRANCHES — 3 primary branches from fork ──
-    val branchCount = 3
-    // Branch definitions: (angle offset, length fraction, thickness fraction)
-    val branchDefs = listOf(
-        Triple(-0.35f + lean * 0.3f, 0.65f, 0.80f),  // left
-        Triple(0.05f + lean * 0.2f, 0.72f, 0.90f),    // center (tallest)
-        Triple(0.40f + lean * 0.3f, 0.60f, 0.75f)     // right
-    )
-
-    // Store branch tip positions for unified canopy
-    val branchTips = mutableListOf<Pair<Float, Float>>()
-
-    for ((b, def) in branchDefs.withIndex()) {
-        val (angle, lenFrac, thickFrac) = def
-        val branchLen = totalH * lenFrac * (1f - forkFrac)
-        val branchThick = trunkW * thickFrac
-
-        // Branch tip
-        val tipX = forkX + angle * totalH * 0.45f
-        val tipY = forkY - branchLen
-
-        branchTips.add(tipX to tipY)
-
-        // Curved branch (filled shape, not just stroke)
-        val bwTop = branchThick * 0.25f  // thin at top
-        val bwBot = branchThick * 0.45f  // thicker at fork
-
-        val brPath = Path()
-        // Left edge (bottom to top)
-        brPath.moveTo(forkX - bwBot * 0.5f + angle * blk * 2, forkY)
-        brPath.cubicTo(
-            forkX + angle * totalH * 0.15f - bwBot * 0.3f, forkY - branchLen * 0.35f,
-            tipX - bwTop * 0.8f + angle * blk, tipY + branchLen * 0.2f,
-            tipX - bwTop, tipY
-        )
-        // Top cap
-        brPath.lineTo(tipX + bwTop, tipY)
-        // Right edge (top to bottom)
-        brPath.cubicTo(
-            tipX + bwTop * 0.8f + angle * blk, tipY + branchLen * 0.2f,
-            forkX + angle * totalH * 0.15f + bwBot * 0.3f, forkY - branchLen * 0.35f,
-            forkX + bwBot * 0.5f + angle * blk * 2, forkY
-        )
-        brPath.close()
-
-        drawPath(brPath, color = TrunkMid)
-        // Shading
-        drawPath(brPath, color = TrunkLight.copy(alpha = 0.15f))
-
-        // ── SUB-BRANCHES — 1-2 thinner forks (reduced for performance) ──
-        val subCount = 1 + (b + trunkHeight) % 2
-        for (s in 0 until subCount) {
-            val subFrac = 0.45f + s * 0.22f  // start between 45%-89% up the branch
-            val subStartX = forkX + (tipX - forkX) * subFrac
-            val subStartY = forkY + (tipY - forkY) * subFrac
-
-            val subAngle = angle + (s - subCount / 2f) * 0.35f
-            val subLen = branchLen * 0.30f
-            val subTipX = subStartX + subAngle * subLen * 0.5f
-            val subTipY = subStartY - subLen * 0.55f
-
-            branchTips.add(subTipX to subTipY)
-
-            val subPath = Path()
-            subPath.moveTo(subStartX, subStartY)
-            subPath.cubicTo(
-                subStartX + subAngle * blk * 3, subStartY - subLen * 0.25f,
-                subTipX - subAngle * blk, subTipY + subLen * 0.1f,
-                subTipX, subTipY
-            )
-            drawPath(
-                subPath,
-                color = TrunkMid.copy(alpha = 0.85f),
-                style = androidx.compose.ui.graphics.drawscope.Stroke(
-                    width = branchThick * 0.18f
-                )
-            )
-        }
-    }
-
-    // ── UNIFIED CANOPY — big dome formed by overlapping filled circles ──
-    // The canopy covers all branch tips as one organic mass (like the sketch)
-    val canR = blk * 5f * canopyMul  // overall canopy radius
-
-    // Canopy center: average of branch tips, shifted up
-    val canCx = branchTips.map { it.first }.average().toFloat()
-    val canCy = branchTips.minOf { it.second } - canR * 0.15f
-
-    // 1) Big dark base oval — defines the overall shape
-    drawOval(
-        color = CanopyDark,
-        topLeft = Offset(canCx - canR * 1.5f, canCy - canR * 0.7f),
-        size = Size(canR * 3.0f, canR * 1.8f)
-    )
-
-    // 2) Main mass — single large blob + side fill (was 3 circles → 2)
-    drawCircle(color = CanopyMid, radius = canR * 1.15f,
-        center = Offset(canCx, canCy + canR * 0.05f))
-    drawOval(color = CanopyMid, topLeft = Offset(canCx - canR * 1.3f, canCy - canR * 0.5f),
-        size = Size(canR * 2.6f, canR * 1.2f))
-
-    // 3) Lighter patches (was 4 → 2)
-    drawCircle(color = CanopyLight, radius = canR * 0.7f,
-        center = Offset(canCx - canR * 0.2f, canCy - canR * 0.25f))
-    drawCircle(color = CanopyLight, radius = canR * 0.55f,
-        center = Offset(canCx + canR * 0.35f, canCy - canR * 0.15f))
-
-    // 4) Single highlight spot
-    drawCircle(color = CanopyHighlight.copy(alpha = 0.30f), radius = canR * 0.30f,
-        center = Offset(canCx, canCy - canR * 0.35f))
-
-    // 5) Bottom edge — darker underside
-    drawOval(
-        color = CanopyDark.copy(alpha = 0.4f),
-        topLeft = Offset(canCx - canR * 1.2f, canCy + canR * 0.3f),
-        size = Size(canR * 2.4f, canR * 0.6f)
-    )
-
-    // ── Vines hanging from canopy ──
-    if (hasVines) {
-        val vineBaseY = canCy + canR * 0.6f
-        for (v in 0..2) {
-            val vx = canCx - canR * 0.6f + v * canR * 0.6f
-            val vineLen = canR * (0.5f + (v * 3 + 1) % 4 * 0.1f)
-            val vinePath = Path()
-            vinePath.moveTo(vx, vineBaseY)
-            vinePath.cubicTo(
-                vx + blk * 2, vineBaseY + vineLen * 0.3f,
-                vx - blk * 1.5f, vineBaseY + vineLen * 0.6f,
-                vx + blk * 0.5f, vineBaseY + vineLen
-            )
-            drawPath(
-                vinePath,
-                color = if (v % 2 == 0) VineDark.copy(alpha = 0.6f) else VineLight.copy(alpha = 0.5f),
-                style = androidx.compose.ui.graphics.drawscope.Stroke(width = blk * 0.5f)
-            )
-        }
-    }
-}
+// drawMangroveTree removed — now using sprite-based trees
 
 // ── Fern ──
 

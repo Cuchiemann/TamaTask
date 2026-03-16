@@ -23,7 +23,8 @@
       "Bash(unzip -o \"animation-pack-spritesheets.zip\" -d \"animation-pack-extracted\")",
       "Bash(py --version)",
       "Bash(python3 -c \":*)",
-      "Bash(python -c \":*)"
+      "Bash(python -c \":*)",
+      "Bash(claude mcp:*)"
     ]
   }
 }

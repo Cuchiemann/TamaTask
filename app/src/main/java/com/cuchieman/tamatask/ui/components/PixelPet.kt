@@ -33,13 +33,13 @@ private const val WALK_FRAME_W = 679   // px per frame in strip
 private const val WALK_FRAME_H = 194   // px height
 private const val WALK_DELAY_MS = 100L // ~10 FPS — snappier walk cycle
 
-// Display sizes (dp) — maintain same pixel-to-dp scale
-// Idle: 500px → 320dp, so 1px = 0.64dp
-// Walk: 679px × 0.64 = 434.56dp, 194px × 0.64 = 124.16dp
+// Display sizes (dp) — walk scaled to match idle height for consistent visual size
+// Idle: 500×145 px → 320×93 dp (0.64 dp/px)
+// Walk: 679×194 px, scaled to same body height as idle: 93dp tall, width = 93 * 679/194 = 325dp
 private val IDLE_DISPLAY_W = 320.dp
 private val IDLE_DISPLAY_H = 93.dp
-private val WALK_DISPLAY_W = 435.dp
-private val WALK_DISPLAY_H = 124.dp
+private val WALK_DISPLAY_W = 325.dp
+private val WALK_DISPLAY_H = 93.dp
 
 /**
  * Animated pixel art Spinosaurus mirabilis.

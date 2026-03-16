@@ -2,6 +2,10 @@ package com.cuchieman.tamatask.ui.screens
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -15,12 +19,15 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.material3.Button
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -32,7 +39,9 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.cuchieman.tamatask.ui.components.PixelNatureBackground
@@ -47,107 +56,128 @@ import kotlin.random.Random
 
 // Background layout fractions — must match PixelNatureBackground
 private const val WATER_TOP_FRACTION = 0.52f
-private const val SHORE_BOTTOM_FRACTION = 0.92f  // don't walk off the bottom
+private const val SHORE_BOTTOM_FRACTION = 0.92f
 
 // Foam color
 private val WaterFoam = Color(0xFFB0DDD5)
 
 // Speed: screen-fractions per second
-private const val WALK_SPEED = 0.08f
+private const val WALK_SPEED = 0.035f
 
 // Idle pause range (ms)
 private const val MIN_IDLE_MS = 2000L
 private const val MAX_IDLE_MS = 6000L
 
-// Screen-space X boundaries (fraction of screen width)
-private const val X_MIN = 0.08f
-private const val X_MAX = 0.92f
+// World-space X boundaries (fraction of panorama, 0..1)
+// Keep away from edges so camera can always keep dino fully on screen
+private const val X_MIN = 0.15f
+private const val X_MAX = 0.85f
+
+// Panorama ratio — must match PixelNatureBackground.PANORAMA_RATIO
+private const val PANORAMA_RATIO = 2.5f
+
+// Y boundaries
+private const val Y_MIN = 0.0f
+private const val Y_MAX = 1.0f
 
 @Composable
 fun PetScreen() {
-    // ── Dino position on screen ──
-    // dinoX: 0=left edge, 1=right edge (horizontal position ON SCREEN)
-    // dinoY: 0=at water line, 1=at shore bottom (vertical position)
     val dinoX = remember { Animatable(0.5f) }
-    val dinoY = remember { Animatable(0.3f) }  // start slightly below water
+    val dinoY = remember { Animatable(0.7f) }
     var isWalking by remember { mutableStateOf(false) }
     var facingLeft by remember { mutableStateOf(false) }
-
-    // Background scroll — gentle parallax linked to dino X
-    val bgScroll = 0.3f + dinoX.value * 0.4f  // maps dino 0..1 → bg 0.3..0.7
-
     // ── Random walking behavior ──
     LaunchedEffect(Unit) {
         while (true) {
-            // 1) Idle pause
             isWalking = false
             delay(Random.nextLong(MIN_IDLE_MS, MAX_IDLE_MS))
 
-            // 2) Pick random target on screen
             val targetX = Random.nextFloat() * (X_MAX - X_MIN) + X_MIN
-            val targetY = Random.nextFloat()  // 0 (in water) to 1 (on shore)
+            val targetY = Random.nextFloat() * (Y_MAX - Y_MIN) + Y_MIN
 
             val dx = abs(targetX - dinoX.value)
             val dy = abs(targetY - dinoY.value)
             val distance = sqrt(dx * dx + dy * dy)
             if (distance < 0.05f) continue
 
-            // 3) Direction: face the way we're going horizontally
-            facingLeft = targetX < dinoX.value
+            facingLeft = targetX > dinoX.value
             isWalking = true
 
-            // 4) Animate X and Y together at constant speed
             val durationMs = (distance / WALK_SPEED * 1000f).toInt().coerceIn(500, 8000)
 
             coroutineScope {
                 launch {
-                    dinoX.animateTo(
-                        targetX,
-                        animationSpec = tween(durationMs, easing = LinearEasing)
-                    )
+                    dinoX.animateTo(targetX, tween(durationMs, easing = LinearEasing))
                 }
                 launch {
-                    dinoY.animateTo(
-                        targetY,
-                        animationSpec = tween(durationMs, easing = LinearEasing)
-                    )
+                    dinoY.animateTo(targetY, tween(durationMs, easing = LinearEasing))
                 }
             }
-            // 5) Arrive → loop back to idle
         }
     }
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val screenH = maxHeight
         val screenW = maxWidth
+        val density = LocalDensity.current
 
-        // Dino display size
-        val dinoHeight = if (isWalking) 124.dp else 93.dp
-        val dinoWidth = if (isWalking) 435.dp else 320.dp
+        val dinoHeight = 93.dp
+        val dinoWidth = if (isWalking) 325.dp else 320.dp
 
-        // ── Vertical position ──
-        // dinoY=0 → center at waterTop (half submerged)
-        // dinoY=1 → center at shore bottom (on dry land)
-        val waterLineY = screenH * WATER_TOP_FRACTION
+        // ── Camera system: dino walks in world, camera follows ──
+        val maxScrollFrac = PANORAMA_RATIO - 1f  // 1.5
+        // Camera tries to center on dino's world X
+        val idealCameraFrac = dinoX.value * PANORAMA_RATIO - 0.5f
+        val cameraFrac = idealCameraFrac.coerceIn(0f, maxScrollFrac)
+        val bgScroll = cameraFrac / maxScrollFrac  // 0..1 for background
+
+        // Dino screen X: world position minus camera scroll (in screen-widths)
+        val dinoScreenCenterFrac = dinoX.value * PANORAMA_RATIO - cameraFrac
+        // Clamp so the full dino (including head/tail) stays on screen
+        val margin = dinoWidth / 2
+        val dinoLeftXRaw = screenW * dinoScreenCenterFrac - dinoWidth / 2
+        val dinoLeftX = dinoLeftXRaw.coerceIn(-margin * 0.1f, screenW - dinoWidth + margin * 0.1f)
+
+        // ── Position dino by FEET (vertical) ──
         val shoreBottomY = screenH * SHORE_BOTTOM_FRACTION
-        val dinoCenterY = waterLineY + (shoreBottomY - waterLineY) * dinoY.value
-        val dinoTopY = dinoCenterY - dinoHeight / 2
+        val deepFeetY = screenH * 0.65f
+        val shoreFeetY = shoreBottomY
+        val feetY: Dp = deepFeetY + (shoreFeetY - deepFeetY) * dinoY.value
+        val dinoTopY: Dp = feetY - dinoHeight
 
-        // ── Horizontal position ──
-        // dinoX maps to screen position (dino center)
-        val dinoLeftX = screenW * dinoX.value - dinoWidth / 2
+        // Dino feet as fraction of screen height (for vegetation depth sorting)
+        val dinoFeetFrac = feetY / screenH
 
-        // ── Submersion effect ──
-        // At dinoY=0 → waterline crosses at 50% of sprite (half submerged)
-        // At dinoY=0.4+ → waterline above sprite (no submersion)
-        // waterFrac = where the waterline is within the dino (0=top, 1=bottom, >1=below dino)
-        val waterLineInDino = (waterLineY - dinoTopY) / dinoHeight
-        val hasSubmersion = waterLineInDino in 0.05f..0.95f
+        // ── Submersion based on dinoY directly ──
+        // shoreThreshold: dino must be well into the water zone before submersion starts
+        val shoreThreshold = 0.42f
+        val maxWaterFracFromBottom = 0.55f
 
-        // Animated pixel art swamp/mangrove panoramic background
+        val waterFracFromBottom = if (dinoY.value >= shoreThreshold) {
+            0f
+        } else {
+            ((shoreThreshold - dinoY.value) / shoreThreshold) * maxWaterFracFromBottom
+        }
+        val waterFracInDino = 1f - waterFracFromBottom
+        val hasSubmersion = waterFracFromBottom > 0.05f
+
+        // Wave animation for foam line
+        val waveTransition = rememberInfiniteTransition(label = "foam")
+        val foamWave by waveTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = 6.2832f,
+            animationSpec = infiniteRepeatable(
+                tween(3000, easing = LinearEasing),
+                RepeatMode.Restart
+            ),
+            label = "foamWave"
+        )
+
+        // Background (everything except foreground vegetation)
         PixelNatureBackground(
             modifier = Modifier.fillMaxSize(),
-            scrollOffset = bgScroll
+            scrollOffset = bgScroll,
+            dinoFeetScreenFrac = dinoFeetFrac
         )
 
         // Pet name label
@@ -178,33 +208,41 @@ fun PetScreen() {
                             .drawWithContent {
                                 drawContent()
 
-                                // Alpha mask for submersion
-                                val wf = waterLineInDino.coerceIn(0.1f, 0.9f)
+                                val wf = waterFracInDino.coerceIn(0.1f, 0.9f)
                                 drawRect(
                                     brush = Brush.verticalGradient(
                                         colorStops = arrayOf(
                                             0.00f to Color.Black,
                                             (wf - 0.02f) to Color.Black,
-                                            wf to Color.Black.copy(alpha = 0.5f),
-                                            (wf + 0.08f).coerceAtMost(1f) to Color.Black.copy(
-                                                alpha = 0.35f
-                                            ),
-                                            1.00f to Color.Black.copy(alpha = 0.20f)
+                                            wf to Color.Black.copy(alpha = 0.45f),
+                                            (wf + 0.10f).coerceAtMost(1f) to Color.Black.copy(alpha = 0.30f),
+                                            1.00f to Color.Black.copy(alpha = 0.15f)
                                         )
                                     ),
                                     blendMode = BlendMode.DstIn
                                 )
 
-                                // Foam line at waterline
+                                // Wavy foam line — only on opaque sprite pixels
                                 val waterY = size.height * wf
-                                drawRect(
-                                    color = WaterFoam.copy(alpha = 0.30f),
-                                    topLeft = Offset(0f, waterY - 1f),
-                                    size = Size(size.width, 2f)
+                                val foamPath = androidx.compose.ui.graphics.Path()
+                                val step = 4f
+                                val steps = (size.width / step).toInt() + 1
+                                foamPath.moveTo(0f, waterY)
+                                for (i in 0..steps) {
+                                    val x = i * step
+                                    val wave = kotlin.math.sin(x * 0.08f + foamWave) * 2.5f +
+                                            kotlin.math.sin(x * 0.15f + foamWave * 1.6f) * 1.2f
+                                    foamPath.lineTo(x, waterY + wave)
+                                }
+                                drawPath(
+                                    foamPath,
+                                    color = WaterFoam.copy(alpha = 0.45f),
+                                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.5f),
+                                    blendMode = BlendMode.SrcAtop
                                 )
                             }
                     } else {
-                        Modifier // no submersion effect needed
+                        Modifier
                     }
                 )
         ) {
@@ -214,5 +252,14 @@ fun PetScreen() {
                 facingLeft = facingLeft
             )
         }
+
+        // Foreground vegetation (plants in front of dino for depth)
+        PixelNatureBackground(
+            modifier = Modifier.fillMaxSize(),
+            scrollOffset = bgScroll,
+            foregroundOnly = true,
+            dinoFeetScreenFrac = dinoFeetFrac
+        )
+
     }
 }
