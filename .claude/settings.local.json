@@ -24,7 +24,26 @@
       "Bash(py --version)",
       "Bash(python3 -c \":*)",
       "Bash(python -c \":*)",
-      "Bash(claude mcp:*)"
+      "Bash(claude mcp:*)",
+      "Bash(find C:UsersEquipoAndroidStudioProjectsTamaTask -type d -name drawable* -o -name assets -o -name mipmap*)",
+      "Bash(find C:UsersEquipoAndroidStudioProjectsTamaTask/app/src -type f \\\\\\(-name *.png -o -name *.webp -o -name *.jpg -o -name *.jpeg \\\\\\))",
+      "mcp__mcp-registry__search_mcp_registry",
+      "Bash(python -c \"from PIL import Image; img=Image.open\\(''idle-that-the-dors.png''\\); print\\(f''Idle: {img.size}''\\); img2=Image.open\\(''walking-that-the-dors.png''\\); print\\(f''Walk: {img2.size}''\\)\")",
+      "Bash(adb logcat:*)",
+      "Bash(where adb:*)",
+      "Read(//c/Users/Equipo/AndroidStudioProjects/TamaTask/$LOCALAPPDATA/Android/Sdk/platform-tools/**)",
+      "Read(//c/Users/Equipo/AndroidStudioProjects/TamaTask/$HOME/AppData/Local/Android/Sdk/platform-tools/**)",
+      "Bash(\"C:\\\\Users\\\\Equipo\\\\AppData\\\\Local\\\\Android\\\\Sdk\\\\platform-tools\\\\adb.exe\" logcat:*)",
+      "Bash(cp \"imagenes/fern-leaves-clipart-illustration.png\" \"drawable-nodpi/veg_fern.png\")",
+      "Bash(cp \"imagenes/87-870141_28-collection-of-bush-drawing-png-bush-drawing-png.png\" \"drawable-nodpi/veg_bush.png\")",
+      "Bash(cp \"imagenes/descarga.png\" \"drawable-nodpi/veg_palm.png\")",
+      "Bash(cp \"imagenes/mossystone1.png\" \"drawable-nodpi/veg_rock1.png\")",
+      "Bash(cp \"imagenes/mossystone2.png\" \"drawable-nodpi/veg_rock2.png\")",
+      "Bash(cp \"imagenes/Juncus.png\" \"drawable-nodpi/veg_reeds.png\")",
+      "Bash(grep -E \"\\\\.kt$\")",
+      "Bash(xargs grep:*)",
+      "Bash(ls \"C:\\\\Users\\\\Equipo\\\\AndroidStudioProjects\\\\TamaTask\\\\app\\\\build\\\\outputs\\\\apk\\\\debug\"\" 2>/dev/null || echo \"No existe \")",
+      "Bash(./gradlew compileDebugKotlin)"
     ]
   }
 }

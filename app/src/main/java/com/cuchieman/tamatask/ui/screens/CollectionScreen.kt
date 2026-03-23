@@ -59,8 +59,10 @@ import com.cuchieman.tamatask.ui.theme.TamaOrange
 import com.cuchieman.tamatask.ui.theme.TamaPink
 import com.cuchieman.tamatask.ui.theme.TamaPurple
 import com.cuchieman.tamatask.ui.theme.TamaYellow
+import com.cuchieman.tamatask.data.model.DinoCollection
+import com.cuchieman.tamatask.data.model.DinoSpec
 
-// ── Creature data ──
+// ── Creature data (from shared DinoCollection) ──
 
 private data class Creature(
     val name: String,
@@ -70,14 +72,9 @@ private data class Creature(
     val accentColor: Color
 )
 
-private val creatures = listOf(
-    Creature("Spike", "Spinosaurus", "Cretacico", unlocked = true, accentColor = TamaOrange),
-    Creature("???", "Velociraptor", "Cretacico", unlocked = false, accentColor = TamaCyan),
-    Creature("???", "Triceratops", "Cretacico", unlocked = false, accentColor = TamaGreen),
-    Creature("???", "Pteranodon", "Cretacico", unlocked = false, accentColor = TamaPurple),
-    Creature("???", "Stegosaurus", "Jurasico", unlocked = false, accentColor = TamaYellow),
-    Creature("???", "T-Rex", "Cretacico", unlocked = false, accentColor = TamaPink),
-)
+private val creatures = DinoCollection.all.map { dino ->
+    Creature(dino.name, dino.species, dino.era, dino.unlocked, dino.accentColor)
+}
 
 @Composable
 fun CollectionScreen() {
@@ -318,7 +315,7 @@ private fun SpinoThumbnail() {
             options
         )
         if (strip != null) {
-            val frame = Bitmap.createBitmap(strip, 0, 0, 500, 145)
+            val frame = Bitmap.createBitmap(strip, 0, 0, 717, 252)
             strip.recycle()
             frame.asImageBitmap()
         } else null

@@ -34,14 +34,14 @@ import kotlin.math.sin
 
 // ── Panoramic config ──────────────────────────────────────────
 // The panorama is PANORAMA_RATIO times wider than the visible screen
-private const val PANORAMA_RATIO = 2.5f
+private const val PANORAMA_RATIO = 3.5f
 
 // ── Sprite reference ──────────────────────────────────────────
-// The Spinosaurus sprite: 500 source px displayed at 320.dp
-// → 1 sprite pixel = 320/500 = 0.64 dp on screen
+// The Spinosaurus sprite: 717 source px displayed at 313.dp
+// → 1 sprite pixel = 313/717 ≈ 0.4365 dp on screen
 // We use this to compute the block size so details match the sprite.
-private const val SPRITE_SOURCE_PX = 500f
-private const val SPRITE_DISPLAY_DP = 320f
+private const val SPRITE_SOURCE_PX = 717f
+private const val SPRITE_DISPLAY_DP = 313f
 
 // ── Color palette ─────────────────────────────────────────────
 
@@ -153,11 +153,13 @@ private data class MangroveTreeData(
     val xFraction: Float,    // position in panorama (0..1)
     val spriteIndex: Int,    // which sprite (0, 1, or 2)
     val scale: Float,        // display scale multiplier
-    val flipH: Boolean = false // mirror horizontally for variety
+    val flipH: Boolean = false, // mirror horizontally for variety
+    val yOffset: Float = 0f  // vertical offset fraction (-0.05..0.05) for natural scatter
 )
 
 private data class VegetationData(
     val xFraction: Float,
+    val yFraction: Float,  // 0..1 position within terrain
     val type: Int,  // 0=fern, 1=bush, 2=grass_tuft, 3=mushroom, 4=moss_rock
     val sizeMul: Float,
     val phase: Float
@@ -179,12 +181,16 @@ fun PixelNatureBackground(
 ) {
     val density = LocalDensity.current.density
 
-    // Load mangrove tree sprites
+    // Load tree sprites: araucaria, cycad (palmera), tree fern
     val treeSprites = listOf(
-        ImageBitmap.imageResource(R.drawable.mangrove_tree_1),
-        ImageBitmap.imageResource(R.drawable.mangrove_tree_2),
-        ImageBitmap.imageResource(R.drawable.mangrove_tree_3)
+        ImageBitmap.imageResource(R.drawable.veg_araucaria),  // 0 = conifer
+        ImageBitmap.imageResource(R.drawable.veg_cycad),       // 1 = cycad/palmera
+        ImageBitmap.imageResource(R.drawable.veg_treefern)     // 2 = tree fern
     )
+
+    // Load ground vegetation sprites
+    val vegFernSprite = ImageBitmap.imageResource(R.drawable.veg_fern)
+    val vegReedsSprite = ImageBitmap.imageResource(R.drawable.veg_reeds)
 
     val infiniteTransition = rememberInfiniteTransition(label = "swamp")
 
@@ -196,19 +202,19 @@ fun PixelNatureBackground(
         ), label = "fog"
     )
 
-    // Water wave (primary)
+    // Water wave (primary) — full cycle 0→2π, long duration to avoid visible reset
     val wave1 by infiniteTransition.animateFloat(
-        initialValue = 0f, targetValue = 6.2832f,
+        initialValue = 0f, targetValue = 62.832f,
         animationSpec = infiniteRepeatable(
-            tween(3000, easing = LinearEasing), RepeatMode.Restart
+            tween(30_000, easing = LinearEasing), RepeatMode.Restart
         ), label = "wave1"
     )
 
     // Water wave (secondary, slower)
     val wave2 by infiniteTransition.animateFloat(
-        initialValue = 0f, targetValue = 6.2832f,
+        initialValue = 0f, targetValue = 62.832f,
         animationSpec = infiniteRepeatable(
-            tween(5000, easing = LinearEasing), RepeatMode.Restart
+            tween(50_000, easing = LinearEasing), RepeatMode.Restart
         ), label = "wave2"
     )
 
@@ -303,60 +309,39 @@ fun PixelNatureBackground(
         )
     }
 
-    // Mangrove trees — forest on far shore (reduced from 26→18 for perf)
+    // Mangrove trees — 42 trees (3x density), randomly placed
     val mangroveTrees = remember {
-        listOf(
-            // Large trees (back layer) — scale ~1.1-1.2
-            MangroveTreeData(0.04f, 0, 1.15f),
-            MangroveTreeData(0.18f, 1, 1.10f, flipH = true),
-            MangroveTreeData(0.32f, 2, 1.20f),
-            MangroveTreeData(0.48f, 0, 1.12f, flipH = true),
-            MangroveTreeData(0.62f, 1, 1.18f),
-            MangroveTreeData(0.76f, 2, 1.10f, flipH = true),
-            MangroveTreeData(0.90f, 0, 1.15f),
-            // Medium trees (mid layer) — scale ~0.85-1.0
-            MangroveTreeData(0.10f, 2, 0.95f, flipH = true),
-            MangroveTreeData(0.25f, 0, 0.90f),
-            MangroveTreeData(0.40f, 1, 0.88f, flipH = true),
-            MangroveTreeData(0.55f, 2, 0.92f),
-            MangroveTreeData(0.70f, 0, 0.85f, flipH = true),
-            MangroveTreeData(0.85f, 1, 0.90f),
-            // Small trees (front) — scale ~0.65-0.80
-            MangroveTreeData(0.15f, 1, 0.75f),
-            MangroveTreeData(0.37f, 2, 0.70f, flipH = true),
-            MangroveTreeData(0.58f, 0, 0.78f),
-            MangroveTreeData(0.80f, 1, 0.65f, flipH = true),
-            MangroveTreeData(0.95f, 2, 0.72f)
-        )
+        val rng = java.util.Random(123L)
+        (0 until 42).map {
+            MangroveTreeData(
+                xFraction = rng.nextFloat(),
+                spriteIndex = rng.nextInt(3),
+                scale = 0.65f + rng.nextFloat() * 0.55f, // 0.65-1.20
+                flipH = rng.nextBoolean(),
+                yOffset = rng.nextFloat() * 0.03f // 0 to +0.03 (never float above anchor)
+            )
+        }
     }
 
-    // Vegetation — organic, scattered, varied sizes
-    // type: 0=fern, 1=bush, 2=grass_tuft, 4=rock
-    // Placed with pseudo-random gaps using golden ratio for natural feel
+    // Vegetation — fully random placement using seeded Random
     val vegetation = remember {
-        val list = mutableListOf<VegetationData>()
-        val golden = 0.618033f
-        var accumulator = 0.13f  // starting seed
-        for (i in 0 until 22) {  // reduced from 30 for performance
-            accumulator = (accumulator + golden) % 1f
-            // Type distribution: bushes 30%, grass 30%, ferns 25%, rocks 15%
-            val type = when {
-                i % 7 == 5 -> 4  // rock (less frequent)
-                i % 4 == 0 -> 1  // bush
-                i % 4 == 1 -> 2  // grass
-                i % 4 == 2 -> 0  // fern
-                else -> 2        // grass
-            }
-            // Bigger sizes with more variation
+        val rng = java.util.Random(42L) // fixed seed for deterministic layout
+        val types = intArrayOf(0, 1, 2, 2, 1, 0, 2, 0) // no rocks, ferns/bush/grass only
+        (0 until 55).map { i ->
+            val type = types[rng.nextInt(types.size)]
             val sizeMul = when (type) {
-                4 -> 2.0f + (i * 3 + 2) % 4 * 0.5f   // rocks: 2.0-3.5
-                1 -> 2.5f + (i * 5 + 1) % 5 * 0.4f   // bushes: 2.5-4.5
-                else -> 2.0f + (i * 7 + 3) % 4 * 0.3f // ferns/grass: 2.0-2.9
+                4 -> 2.0f + rng.nextFloat() * 1.5f   // rocks: 2.0-3.5
+                1 -> 2.5f + rng.nextFloat() * 2.0f   // bushes: 2.5-4.5
+                else -> 2.0f + rng.nextFloat() * 0.9f // ferns/grass: 2.0-2.9
             }
-            val phase = (i * 2.17f) % 6.28f
-            list.add(VegetationData(accumulator, type, sizeMul, phase))
+            VegetationData(
+                xFraction = rng.nextFloat(),
+                yFraction = 0.05f + rng.nextFloat() * 0.80f,
+                type = type,
+                sizeMul = sizeMul,
+                phase = rng.nextFloat() * 6.28f
+            )
         }
-        list
     }
 
     Canvas(modifier = modifier.fillMaxSize()) {
@@ -366,9 +351,8 @@ fun PixelNatureBackground(
         // Block size matching the sprite's pixel resolution
         // 1 sprite pixel = SPRITE_DISPLAY_DP * density / SPRITE_SOURCE_PX
         val spritePx = SPRITE_DISPLAY_DP * density / SPRITE_SOURCE_PX
-        // For detail elements we use a visible "art block" of 3 sprite pixels
-        // (matches the smallest visible features in the sprite like claw outlines)
-        val blk = spritePx * 3f
+        // For detail elements we use a visible "art block" scaled 2.5x for new sprite
+        val blk = spritePx * 3f * 2.5f
 
         // Panorama scroll: how much of the panorama is offscreen
         val panoramaWidth = w * PANORAMA_RATIO
@@ -378,7 +362,7 @@ fun PixelNatureBackground(
         // ── Layout (fractions of screen height) ──
         val skyEnd = h * 0.42f
         val mangroveY = h * 0.40f
-        val waterTop = h * 0.52f
+        val waterTop = h * 0.56f
         val waterBottom = h * 0.78f
         val shoreTop = h * 0.75f
 
@@ -426,12 +410,17 @@ fun PixelNatureBackground(
             val screenX = worldX - scrollPx
             if (screenX > -blk * 80 && screenX < w + blk * 80) {
                 val sprite = treeSprites[tree.spriteIndex]
-                val pxSize = blk * tree.scale  // each sprite pixel = this many screen px
+                // Scale per tree type: cycad (1) smaller, araucaria (0) & treefern (2) bigger
+                val typeScale = when (tree.spriteIndex) {
+                    1 -> 0.35f   // cycad/palmera — smaller
+                    else -> 0.7f // araucaria & tree fern — bigger
+                }
+                val pxSize = spritePx * tree.scale * typeScale
                 val drawW = sprite.width * pxSize
                 val drawH = sprite.height * pxSize
                 val drawX = screenX - drawW / 2
-                // Anchor: roots (bottom ~15% of sprite) sit at water line
-                val drawY = waterTop - drawH * 0.82f
+                // Anchor: tree bottom sits at water line, offset only pushes down
+                val drawY = waterTop - drawH + tree.yOffset * h
 
                 if (tree.flipH) {
                     withTransform({
@@ -480,12 +469,13 @@ fun PixelNatureBackground(
             val worldX = cluster.xFraction * panoramaWidth
             val screenX = worldX - scrollPx
             if (screenX > -blk * 12 && screenX < w + blk * 12) {
-                // Wind adds extra sway to reeds
-                val windySway = reedSway + windStrength * 1.2f
-                drawReedCluster(
-                    screenX, waterTop - blk, blk,
-                    cluster.count, cluster.baseHeight,
-                    windySway, cluster.phase
+                val reedH = blk * cluster.baseHeight * 1.5f
+                val reedW = reedH * vegReedsSprite.width / vegReedsSprite.height
+                drawImage(
+                    image = vegReedsSprite,
+                    dstOffset = IntOffset((screenX - reedW / 2).toInt(), (waterTop - reedH + reedH * 0.3f).toInt()),
+                    dstSize = IntSize(reedW.toInt(), reedH.toInt()),
+                    filterQuality = FilterQuality.None
                 )
             }
         }
@@ -502,29 +492,28 @@ fun PixelNatureBackground(
         //     Split by depth: behind-dino vs in-front-of-dino
         // ══════════════════════════════════════════
         val terrainH = h - shoreTop
-        val vegRows = listOf(0.08f, 0.40f, 0.75f)
-        vegRows.forEachIndexed { rowIdx, rowFrac ->
-            val rowBaseY = shoreTop + terrainH * rowFrac
-            val perspScale = 0.85f + rowIdx * 0.2f
-            vegetation.forEach { veg ->
-                val worldX = veg.xFraction * panoramaWidth
-                val rowOffsetX = rowIdx * panoramaWidth * 0.12f
-                val screenX = (worldX + rowOffsetX) % panoramaWidth - scrollPx
-                if (screenX > -blk * 15 && screenX < w + blk * 15) {
-                    val yJitter = sin(worldX * 0.023f + veg.phase) * terrainH * 0.15f
-                    val vegY = (rowBaseY + yJitter).coerceAtLeast(shoreTop + blk * 3)
-                    // Depth test: vegetation below dino feet = foreground
-                    val isForeground = vegY > dinoFeetPx
-                    if (isForeground == foregroundOnly) {
-                        val sz = blk * veg.sizeMul * perspScale
-                        val windySway = reedSway + windStrength * 1.0f
-                        when (veg.type) {
-                            0 -> drawFern(screenX, vegY, sz, windySway, veg.phase)
-                            1 -> drawBush(screenX, vegY, sz)
-                            2 -> drawGrassTuft(screenX, vegY, sz, windySway, veg.phase)
-                            4 -> drawMossRock(screenX, vegY, sz)
-                        }
-                    }
+        vegetation.forEach { veg ->
+            val worldX = veg.xFraction * panoramaWidth
+            val screenX = worldX - scrollPx
+            if (screenX > -blk * 15 && screenX < w + blk * 15) {
+                val yFrac = veg.yFraction
+                val vegY = (shoreTop + terrainH * yFrac).coerceAtLeast(shoreTop + blk * 3)
+                // Perspective: plants further back (lower yFrac) are smaller
+                val perspScale = 0.8f + yFrac * 0.4f
+                // Depth test: vegetation below dino feet = foreground
+                val isForeground = vegY > dinoFeetPx
+                if (isForeground == foregroundOnly) {
+                    val sz = blk * veg.sizeMul * perspScale * 6f  // slightly smaller ferns
+                    // All ground vegetation uses fern sprite now
+                    val sprite = vegFernSprite
+                    val drawH = sz
+                    val drawW = drawH * sprite.width / sprite.height
+                    drawImage(
+                        image = sprite,
+                        dstOffset = IntOffset((screenX - drawW / 2).toInt(), (vegY - drawH).toInt()),
+                        dstSize = IntSize(drawW.toInt(), drawH.toInt()),
+                        filterQuality = FilterQuality.None
+                    )
                 }
             }
         }
@@ -669,21 +658,6 @@ private fun DrawScope.drawMangroves(
     canopyPath.close()
     drawPath(canopyPath, color = MangroveMid.copy(alpha = 0.7f))
 
-    // Aerial roots (detail blocks)
-    val rootStep = blk * 6
-    val rootCols = (screenWidth / rootStep).toInt() + 1
-    for (i in 0..rootCols) {
-        val screenX = i * rootStep
-        val worldX = screenX + scrollPx
-        val rootHash = ((worldX * 0.1f).toInt() * 7 + 13) % 5
-        if (rootHash < 3) {
-            val rootLen = 2 + rootHash
-            for (r in 0 until rootLen) {
-                val alpha = 0.5f - r * 0.1f
-                px(screenX, baseY + blk * 4 + r * blk, blk, MangroveRoot.copy(alpha = alpha.coerceAtLeast(0.1f)))
-            }
-        }
-    }
 }
 
 // ── Water body (smooth gradients + wave shapes) ──
@@ -701,35 +675,38 @@ private fun DrawScope.drawWaterBody(
     )
     val bandCount = bandColors.size
 
-    // First fill entire water area with darkest color
-    drawRect(
-        color = bandColors[0],
-        topLeft = Offset(0f, topY),
-        size = Size(screenWidth, waterHeight)
-    )
-
     // Draw each band from top to bottom with a wavy top edge
     val waveStep = 6f
     val steps = (screenWidth / waveStep).toInt() + 1
+
+    // First fill water area with darkest color, using wavy top edge
+    val basePath = Path()
+    val baseAmp1 = waterHeight * 0.015f
+    val baseAmp2 = waterHeight * 0.008f
+    basePath.moveTo(-10f, bottomY + 10f)
+    basePath.lineTo(-10f, topY)
+    for (i in 0..steps) {
+        val x = i * waveStep
+        val wy = sin(x * 0.009f + wave1 * 0.15f) * baseAmp1 +
+                sin(x * 0.022f + 1.2f + wave2 * 0.1f) * baseAmp2
+        basePath.lineTo(x, topY + wy)
+    }
+    basePath.lineTo(screenWidth + 10f, bottomY + 10f)
+    basePath.close()
+    drawPath(basePath, color = bandColors[0])
 
     for (band in 1 until bandCount) {
         val bandFrac = band.toFloat() / bandCount
         val baseY = topY + waterHeight * bandFrac
 
-        val bandPath = Path()
-        bandPath.moveTo(-10f, bottomY + 10f)  // bottom-left
-
         // Wavy top edge — each band has unique wave pattern
-        // Use multiple frequencies with different seeds per band for variety
         val seed1 = band * 1.7f + 0.3f
         val seed2 = band * 2.3f + 1.1f
         val seed3 = band * 0.7f + 2.5f
-        // Amplitude: small irregular waves (like the reference pixel art)
         val amp1 = waterHeight * 0.012f * (1f + (band % 3) * 0.3f)
         val amp2 = waterHeight * 0.007f * (1f + (band % 2) * 0.4f)
         val amp3 = waterHeight * 0.004f
 
-        // Build the wavy edge from right to left (so path fills correctly)
         val edgePoints = mutableListOf<Offset>()
         for (i in 0..steps) {
             val x = i * waveStep
@@ -740,6 +717,7 @@ private fun DrawScope.drawWaterBody(
         }
 
         // Build path: bottom → wavy top edge → close
+        val bandPath = Path()
         bandPath.moveTo(-10f, bottomY + 10f)
         bandPath.lineTo(-10f, edgePoints.first().y)
         for (pt in edgePoints) {

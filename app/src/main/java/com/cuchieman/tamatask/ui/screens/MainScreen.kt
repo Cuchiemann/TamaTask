@@ -14,12 +14,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -27,40 +28,32 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
-import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import androidx.navigation.navArgument
-import com.cuchieman.tamatask.TamaTaskApplication
 import com.cuchieman.tamatask.navigation.BottomNavItem
-import com.cuchieman.tamatask.navigation.Screen
 import com.cuchieman.tamatask.ui.theme.SplashGradient1
 import com.cuchieman.tamatask.ui.theme.SplashGradient2
 import com.cuchieman.tamatask.ui.theme.SplashGradient3
 import com.cuchieman.tamatask.ui.theme.SplashGradient4
-import com.cuchieman.tamatask.ui.theme.TamaCyan
 import com.cuchieman.tamatask.ui.theme.TamaGreen
 import com.cuchieman.tamatask.ui.theme.TamaOrange
 import com.cuchieman.tamatask.ui.theme.TamaPink
 import com.cuchieman.tamatask.ui.theme.TamaPurple
 import com.cuchieman.tamatask.ui.theme.TamaYellow
-import com.cuchieman.tamatask.ui.viewmodel.TaskViewModel
 
 @Composable
 fun MainScreen() {
     val navController = rememberNavController()
     val items = listOf(
         BottomNavItem.Pet,
-        BottomNavItem.Tasks,
+        BottomNavItem.Excavate,
         BottomNavItem.Collection,
         BottomNavItem.Profile
     )
@@ -68,16 +61,14 @@ fun MainScreen() {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
 
-    // Check if we're on a tab route (show bottom bar) or detail/create route (hide it)
+    // Check if we're on a tab route (show bottom bar) or minigame route (hide it)
     val tabRoutes = items.map { it.route }
-    val showBottomBar = currentRoute in tabRoutes
-
-    // ViewModel scoped to this composable (activity-level effectively)
-    val context = LocalContext.current
-    val app = context.applicationContext as TamaTaskApplication
-    val taskViewModel: TaskViewModel = viewModel(
-        factory = TaskViewModel.Factory(app.taskRepository)
-    )
+    var excavationActive by remember { mutableStateOf(false) }
+    // Reset excavation state when leaving the Excavate tab
+    if (currentRoute != BottomNavItem.Excavate.route) {
+        excavationActive = false
+    }
+    val showBottomBar = currentRoute in tabRoutes && !excavationActive
 
     Scaffold(
         bottomBar = {
@@ -106,15 +97,10 @@ fun MainScreen() {
             composable(BottomNavItem.Pet.route) {
                 PetScreen()
             }
-            composable(BottomNavItem.Tasks.route) {
-                TasksScreen(
-                    viewModel = taskViewModel,
-                    onTaskClick = { taskId ->
-                        navController.navigate(Screen.TaskDetail.createRoute(taskId))
-                    },
-                    onCreateClick = {
-                        navController.navigate(Screen.TaskCreate.route)
-                    }
+            composable(BottomNavItem.Excavate.route) {
+                MinigameScreen(
+                    onBack = { navController.popBackStack() },
+                    onShowBottomBar = { show -> excavationActive = !show }
                 )
             }
             composable(BottomNavItem.Collection.route) {
@@ -122,23 +108,6 @@ fun MainScreen() {
             }
             composable(BottomNavItem.Profile.route) {
                 ProfileScreen()
-            }
-            composable(Screen.TaskCreate.route) {
-                TaskCreateScreen(
-                    viewModel = taskViewModel,
-                    onBack = { navController.popBackStack() }
-                )
-            }
-            composable(
-                route = Screen.TaskDetail.route,
-                arguments = listOf(navArgument("taskId") { type = NavType.LongType })
-            ) { backStackEntry ->
-                val taskId = backStackEntry.arguments?.getLong("taskId") ?: return@composable
-                TaskDetailScreen(
-                    taskId = taskId,
-                    viewModel = taskViewModel,
-                    onBack = { navController.popBackStack() }
-                )
             }
         }
     }
@@ -249,7 +218,7 @@ private fun TamaNavItem(
     // Each tab gets its own color when selected
     val selectedColor = when (item) {
         is BottomNavItem.Pet -> TamaGreen
-        is BottomNavItem.Tasks -> TamaCyan
+        is BottomNavItem.Excavate -> TamaYellow
         is BottomNavItem.Collection -> TamaOrange
         is BottomNavItem.Profile -> TamaPurple
     }
@@ -351,29 +320,21 @@ private fun TamaNavItem(
                         drawRect(crackColor, Offset(6f * px, 3f * px), Size(px, px))
                         drawRect(crackColor, Offset(7f * px, 4f * px), Size(px, px))
                     }
-                    is BottomNavItem.Tasks -> {
-                        // Pixel clipboard with checkmarks
-                        // Clipboard top clip
-                        for (col in 3..5) drawRect(c, Offset(col * px, 0f * px), Size(px, px))
-                        // Board outline
-                        for (col in 1..7) {
-                            drawRect(c, Offset(col * px, 1f * px), Size(px, px))
-                            drawRect(c, Offset(col * px, 8f * px), Size(px, px))
-                        }
-                        for (row in 1..8) {
-                            drawRect(c, Offset(1f * px, row * px), Size(px, px))
-                            drawRect(c, Offset(7f * px, row * px), Size(px, px))
-                        }
-                        // Check marks (2 lines)
-                        drawRect(c, Offset(2f * px, 3f * px), Size(px, px))
-                        drawRect(c, Offset(3f * px, 4f * px), Size(px, px))
-                        drawRect(c, Offset(4f * px, 3f * px), Size(px, px))
-                        for (col in 5..6) drawRect(c, Offset(col * px, 3f * px), Size(px, px))
-
+                    is BottomNavItem.Excavate -> {
+                        // Simple X icon
+                        drawRect(c, Offset(1f * px, 1f * px), Size(px, px))
+                        drawRect(c, Offset(2f * px, 2f * px), Size(px, px))
+                        drawRect(c, Offset(3f * px, 3f * px), Size(px, px))
+                        drawRect(c, Offset(4f * px, 4f * px), Size(px, px))
+                        drawRect(c, Offset(5f * px, 5f * px), Size(px, px))
+                        drawRect(c, Offset(6f * px, 6f * px), Size(px, px))
+                        drawRect(c, Offset(7f * px, 7f * px), Size(px, px))
+                        drawRect(c, Offset(7f * px, 1f * px), Size(px, px))
+                        drawRect(c, Offset(6f * px, 2f * px), Size(px, px))
+                        drawRect(c, Offset(5f * px, 3f * px), Size(px, px))
+                        drawRect(c, Offset(3f * px, 5f * px), Size(px, px))
                         drawRect(c, Offset(2f * px, 6f * px), Size(px, px))
-                        drawRect(c, Offset(3f * px, 7f * px), Size(px, px))
-                        drawRect(c, Offset(4f * px, 6f * px), Size(px, px))
-                        for (col in 5..6) drawRect(c, Offset(col * px, 6f * px), Size(px, px))
+                        drawRect(c, Offset(1f * px, 7f * px), Size(px, px))
                     }
                     is BottomNavItem.Collection -> {
                         // Pixel book / collection

@@ -23,23 +23,24 @@ import kotlinx.coroutines.delay
 
 // ── Idle animation ──
 private const val IDLE_FRAMES = 36
-private const val IDLE_FRAME_W = 500   // px per frame in strip
-private const val IDLE_FRAME_H = 145   // px height
+private const val IDLE_FRAME_W = 717   // px per frame in strip
+private const val IDLE_FRAME_H = 252   // px height
 private const val IDLE_DELAY_MS = 200L // ~5 FPS
 
 // ── Walk animation ──
 private const val WALK_FRAMES = 36
-private const val WALK_FRAME_W = 679   // px per frame in strip
-private const val WALK_FRAME_H = 194   // px height
+private const val WALK_FRAME_W = 694   // px per frame in strip
+private const val WALK_FRAME_H = 229   // px height
 private const val WALK_DELAY_MS = 100L // ~10 FPS — snappier walk cycle
 
-// Display sizes (dp) — walk scaled to match idle height for consistent visual size
-// Idle: 500×145 px → 320×93 dp (0.64 dp/px)
-// Walk: 679×194 px, scaled to same body height as idle: 93dp tall, width = 93 * 679/194 = 325dp
-private val IDLE_DISPLAY_W = 320.dp
-private val IDLE_DISPLAY_H = 93.dp
-private val WALK_DISPLAY_W = 325.dp
-private val WALK_DISPLAY_H = 93.dp
+// Display sizes (dp) — unified height so idle/walk dino looks same size
+// Both use 110dp height; width preserves aspect ratio
+// Idle: 717×252 → 313×110 dp (0.4365 dp/px)
+// Walk: 694×229 → 333×110 dp (0.4803 dp/px)
+private val IDLE_DISPLAY_W = 313.dp
+private val IDLE_DISPLAY_H = 110.dp
+private val WALK_DISPLAY_W = 333.dp
+private val WALK_DISPLAY_H = 110.dp
 
 /**
  * Animated pixel art Spinosaurus mirabilis.

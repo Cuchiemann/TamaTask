@@ -7,18 +7,35 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.tween
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -29,8 +46,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -38,12 +57,20 @@ import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.cuchieman.tamatask.data.model.DinoCollection
+import com.cuchieman.tamatask.data.model.DinoSpec
 import com.cuchieman.tamatask.ui.components.PixelNatureBackground
 import com.cuchieman.tamatask.ui.components.PixelSpinosaurus
 import com.cuchieman.tamatask.ui.theme.PixelFontFamily
@@ -55,14 +82,14 @@ import kotlin.math.sqrt
 import kotlin.random.Random
 
 // Background layout fractions — must match PixelNatureBackground
-private const val WATER_TOP_FRACTION = 0.52f
+private const val WATER_TOP_FRACTION = 0.56f
 private const val SHORE_BOTTOM_FRACTION = 0.92f
 
 // Foam color
 private val WaterFoam = Color(0xFFB0DDD5)
 
 // Speed: screen-fractions per second
-private const val WALK_SPEED = 0.035f
+private const val WALK_SPEED = 0.025f
 
 // Idle pause range (ms)
 private const val MIN_IDLE_MS = 2000L
@@ -74,18 +101,35 @@ private const val X_MIN = 0.15f
 private const val X_MAX = 0.85f
 
 // Panorama ratio — must match PixelNatureBackground.PANORAMA_RATIO
-private const val PANORAMA_RATIO = 2.5f
+private const val PANORAMA_RATIO = 3.5f
 
 // Y boundaries
 private const val Y_MIN = 0.0f
 private const val Y_MAX = 1.0f
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun PetScreen() {
     val dinoX = remember { Animatable(0.5f) }
     val dinoY = remember { Animatable(0.7f) }
     var isWalking by remember { mutableStateOf(false) }
     var facingLeft by remember { mutableStateOf(false) }
+
+    // Dino collection — unlocked first
+    val dinos = remember { DinoCollection.sorted }
+    val pagerState = rememberPagerState(initialPage = 0) { dinos.size }
+    var selectedDino by remember { mutableStateOf(dinos.first()) }
+
+    // Update selected dino when pager changes (only if unlocked)
+    LaunchedEffect(pagerState) {
+        snapshotFlow { pagerState.currentPage }.collect { page ->
+            val dino = dinos[page]
+            if (dino.unlocked) {
+                selectedDino = dino
+            }
+        }
+    }
+
     // ── Random walking behavior ──
     LaunchedEffect(Unit) {
         while (true) {
@@ -121,22 +165,21 @@ fun PetScreen() {
         val screenW = maxWidth
         val density = LocalDensity.current
 
-        val dinoHeight = 93.dp
-        val dinoWidth = if (isWalking) 325.dp else 320.dp
+        val dinoHeight = if (isWalking) 110.dp else 110.dp
+        val dinoWidth = if (isWalking) 333.dp else 313.dp
 
         // ── Camera system: dino walks in world, camera follows ──
-        val maxScrollFrac = PANORAMA_RATIO - 1f  // 1.5
-        // Camera tries to center on dino's world X
+        val maxScrollFrac = PANORAMA_RATIO - 1f
         val idealCameraFrac = dinoX.value * PANORAMA_RATIO - 0.5f
         val cameraFrac = idealCameraFrac.coerceIn(0f, maxScrollFrac)
-        val bgScroll = cameraFrac / maxScrollFrac  // 0..1 for background
+        val bgScroll = cameraFrac / maxScrollFrac
 
-        // Dino screen X: world position minus camera scroll (in screen-widths)
         val dinoScreenCenterFrac = dinoX.value * PANORAMA_RATIO - cameraFrac
-        // Clamp so the full dino (including head/tail) stays on screen
         val margin = dinoWidth / 2
         val dinoLeftXRaw = screenW * dinoScreenCenterFrac - dinoWidth / 2
-        val dinoLeftX = dinoLeftXRaw.coerceIn(-margin * 0.1f, screenW - dinoWidth + margin * 0.1f)
+        val clampMin = -margin * 0.1f
+        val clampMax = screenW - dinoWidth + margin * 0.1f
+        val dinoLeftX = if (clampMin <= clampMax) dinoLeftXRaw.coerceIn(clampMin, clampMax) else dinoLeftXRaw
 
         // ── Position dino by FEET (vertical) ──
         val shoreBottomY = screenH * SHORE_BOTTOM_FRACTION
@@ -145,11 +188,9 @@ fun PetScreen() {
         val feetY: Dp = deepFeetY + (shoreFeetY - deepFeetY) * dinoY.value
         val dinoTopY: Dp = feetY - dinoHeight
 
-        // Dino feet as fraction of screen height (for vegetation depth sorting)
         val dinoFeetFrac = feetY / screenH
 
-        // ── Submersion based on dinoY directly ──
-        // shoreThreshold: dino must be well into the water zone before submersion starts
+        // ── Submersion ──
         val shoreThreshold = 0.42f
         val maxWaterFracFromBottom = 0.55f
 
@@ -161,7 +202,6 @@ fun PetScreen() {
         val waterFracInDino = 1f - waterFracFromBottom
         val hasSubmersion = waterFracFromBottom > 0.05f
 
-        // Wave animation for foam line
         val waveTransition = rememberInfiniteTransition(label = "foam")
         val foamWave by waveTransition.animateFloat(
             initialValue = 0f,
@@ -173,16 +213,16 @@ fun PetScreen() {
             label = "foamWave"
         )
 
-        // Background (everything except foreground vegetation)
+        // Background
         PixelNatureBackground(
             modifier = Modifier.fillMaxSize(),
             scrollOffset = bgScroll,
             dinoFeetScreenFrac = dinoFeetFrac
         )
 
-        // Pet name label
+        // Pet name label — shows selected dino's species
         Text(
-            text = "Spinosaurus",
+            text = selectedDino.species,
             fontFamily = PixelFontFamily,
             fontSize = 14.sp,
             fontWeight = FontWeight.Bold,
@@ -222,7 +262,6 @@ fun PetScreen() {
                                     blendMode = BlendMode.DstIn
                                 )
 
-                                // Wavy foam line — only on opaque sprite pixels
                                 val waterY = size.height * wf
                                 val foamPath = androidx.compose.ui.graphics.Path()
                                 val step = 4f
@@ -253,7 +292,7 @@ fun PetScreen() {
             )
         }
 
-        // Foreground vegetation (plants in front of dino for depth)
+        // Foreground vegetation
         PixelNatureBackground(
             modifier = Modifier.fillMaxSize(),
             scrollOffset = bgScroll,
@@ -261,5 +300,132 @@ fun PetScreen() {
             dinoFeetScreenFrac = dinoFeetFrac
         )
 
+        // ══════════════════════════════════════════
+        // DINO CAROUSEL — bottom, floating over terrain
+        // ══════════════════════════════════════════
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 4.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            HorizontalPager(
+                state = pagerState,
+                contentPadding = PaddingValues(horizontal = (screenW - 80.dp) / 2),
+                pageSpacing = 8.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(72.dp)
+            ) { page ->
+                val dino = dinos[page]
+                val isSelected = page == pagerState.currentPage
+                DinoCarouselCard(dino = dino, isSelected = isSelected)
+            }
+
+            // Page indicator dots
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(
+                horizontalArrangement = Arrangement.Center,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                dinos.forEachIndexed { index, dino ->
+                    val isActive = index == pagerState.currentPage
+                    Box(
+                        modifier = Modifier
+                            .padding(horizontal = 2.dp)
+                            .size(if (isActive) 6.dp else 4.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (isActive) dino.accentColor
+                                else Color.White.copy(alpha = 0.4f)
+                            )
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(2.dp))
+        }
+    }
+}
+
+/** Single card in the dino carousel */
+@Composable
+private fun DinoCarouselCard(dino: DinoSpec, isSelected: Boolean) {
+    val context = LocalContext.current
+
+    // Load thumbnail: first frame of idle strip (if unlocked and has sprites)
+    val thumbnail: ImageBitmap? = remember(dino.id) {
+        if (dino.unlocked && dino.idleStripRes != null) {
+            val options = BitmapFactory.Options().apply { inScaled = false }
+            val resId = context.resources.getIdentifier(dino.idleStripRes, "drawable", context.packageName)
+            if (resId != 0) {
+                val strip = BitmapFactory.decodeResource(context.resources, resId, options)
+                if (strip != null) {
+                    // Extract first frame (717px wide for spino)
+                    val frameW = strip.width / 36  // assume 36 frames
+                    val frame = Bitmap.createBitmap(strip, 0, 0, frameW, strip.height)
+                    strip.recycle()
+                    frame.asImageBitmap()
+                } else null
+            } else null
+        } else null
+    }
+
+    Box(
+        modifier = Modifier
+            .size(72.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color.Black.copy(alpha = 0.45f))
+            .then(
+                if (isSelected) Modifier.border(2.dp, dino.accentColor, RoundedCornerShape(8.dp))
+                else Modifier.border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(8.dp))
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        if (dino.unlocked && thumbnail != null) {
+            // Show dino thumbnail
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Image(
+                    bitmap = thumbnail,
+                    contentDescription = dino.species,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .padding(2.dp),
+                    contentScale = ContentScale.Fit,
+                    filterQuality = FilterQuality.None
+                )
+                Text(
+                    text = dino.name,
+                    fontFamily = PixelFontFamily,
+                    fontSize = 8.sp,
+                    color = if (isSelected) dino.accentColor else Color.White.copy(alpha = 0.7f),
+                    textAlign = TextAlign.Center,
+                    maxLines = 1
+                )
+            }
+        } else {
+            // Locked — show lock icon and species
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                // Pixel art lock
+                Canvas(modifier = Modifier.size(32.dp)) {
+                    val b = size.width / 10f
+                    val lockColor = dino.accentColor.copy(alpha = 0.5f)
+                    // Lock arch
+                    drawRect(lockColor, Offset(2*b, 0f), Size(b, 4*b))
+                    drawRect(lockColor, Offset(7*b, 0f), Size(b, 4*b))
+                    drawRect(lockColor, Offset(2*b, 0f), Size(6*b, b))
+                    // Lock body
+                    drawRect(lockColor, Offset(b, 4*b), Size(8*b, 6*b))
+                    // Keyhole
+                    drawRect(Color.Black.copy(alpha = 0.6f), Offset(4*b, 6*b), Size(2*b, 2*b))
+                }
+                Text(
+                    text = "???",
+                    fontFamily = PixelFontFamily,
+                    fontSize = 8.sp,
+                    color = Color.White.copy(alpha = 0.4f),
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
     }
 }
