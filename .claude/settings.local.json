@@ -43,7 +43,8 @@
       "Bash(grep -E \"\\\\.kt$\")",
       "Bash(xargs grep:*)",
       "Bash(ls \"C:\\\\Users\\\\Equipo\\\\AndroidStudioProjects\\\\TamaTask\\\\app\\\\build\\\\outputs\\\\apk\\\\debug\"\" 2>/dev/null || echo \"No existe \")",
-      "Bash(./gradlew compileDebugKotlin)"
+      "Bash(./gradlew compileDebugKotlin)",
+      "Bash(git add:*)"
     ]
   }
 }
