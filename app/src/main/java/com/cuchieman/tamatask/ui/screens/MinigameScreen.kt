@@ -178,8 +178,8 @@ fun MinigameScreen(onBack: () -> Unit, onShowBottomBar: (Boolean) -> Unit = {}) 
 
         MinigamePhase.EXCAVATION -> ExcavationPhase(
             round = round,
-            hitCount = 6 + selectedSiteIndex,
-            timeLimitSeconds = (10 - selectedSiteIndex * 2).coerceAtLeast(4),
+            hitCount = 5 + selectedSiteIndex,
+            tapTimeLimitMs = 10000L / (5 + selectedSiteIndex),
             onComplete = { phase = MinigamePhase.SUCCESS },
             onTimeUp = { phase = MinigamePhase.FAILURE }
         )
@@ -418,7 +418,7 @@ private fun SiteDetailPhase(
 private fun ExcavationPhase(
     round: Int,
     hitCount: Int,
-    timeLimitSeconds: Int,
+    tapTimeLimitMs: Long,
     onComplete: () -> Unit,
     onTimeUp: () -> Unit
 ) {
@@ -447,16 +447,17 @@ private fun ExcavationPhase(
     var nextExpected by remember(round) { mutableIntStateOf(1) }
     var completed by remember(round) { mutableStateOf(false) }
 
-    // Timer
-    var timeLeft by remember(round) { mutableStateOf(timeLimitSeconds * 1000L) }
+    // Per-tap timer: resets every time you hit the correct number
+    var timeLeft by remember(round) { mutableStateOf(tapTimeLimitMs) }
+    var tapStartNanos by remember(round) { mutableStateOf(0L) }
 
-    LaunchedEffect(round) {
-        val startTime = withFrameNanos { it }
-        val totalMs = timeLimitSeconds * 1000L
+    LaunchedEffect(round, nextExpected) {
+        tapStartNanos = withFrameNanos { it }
+        timeLeft = tapTimeLimitMs
         while (timeLeft > 0 && !completed) {
             val now = withFrameNanos { it }
-            val elapsed = (now - startTime) / 1_000_000
-            timeLeft = (totalMs - elapsed).coerceAtLeast(0)
+            val elapsed = (now - tapStartNanos) / 1_000_000
+            timeLeft = (tapTimeLimitMs - elapsed).coerceAtLeast(0)
             if (timeLeft <= 0) {
                 onTimeUp()
                 return@LaunchedEffect
@@ -505,7 +506,8 @@ private fun ExcavationPhase(
                             val rockCx = w * 0.5f
                             val rockCy = h * 0.50f
                             val rockRadius = w * 0.35f
-                            val hitRadius = rockRadius * 0.16f
+                            val frac = (timeLeft / tapTimeLimitMs.toFloat()).coerceIn(0f, 1f)
+                            val hitRadius = rockRadius * 0.24f * (0.4f + 0.6f * frac)
 
                             for (i in hitPoints.indices) {
                                 if (!hitPoints[i].hit && hitPoints[i].number == nextExpected) {
@@ -538,19 +540,22 @@ private fun ExcavationPhase(
                 val rockRadius = w * 0.35f
                 drawRockPile(rockCx, rockCy, rockRadius)
 
-                // Hit point markers
+                // Hit point markers – only show the current target number
+                val timerFrac = (timeLeft / tapTimeLimitMs.toFloat()).coerceIn(0f, 1f)
+                val markerBase = rockRadius * 0.24f
+                val markerSize = markerBase * (0.4f + 0.6f * timerFrac) // shrinks to 40% as time runs out
                 hitPoints.forEach { point ->
                     val px = rockCx + point.xFrac * rockRadius
                     val py = rockCy + point.yFrac * rockRadius
                     if (point.hit) {
                         drawCrackMark(px, py, rockRadius * 0.06f)
-                    } else {
-                        drawNumberedMarker(px, py, rockRadius * 0.16f, point.number, textMeasurer)
+                    } else if (point.number == nextExpected) {
+                        drawNumberedMarker(px, py, markerSize, point.number, textMeasurer)
                     }
                 }
 
                 // Timer bar at top
-                val timerFraction = timeLeft / (timeLimitSeconds * 1000f)
+                val timerFraction = timeLeft / tapTimeLimitMs.toFloat()
                 val barMargin = w * 0.08f
                 val barY = h * 0.05f
                 val barH = h * 0.025f
