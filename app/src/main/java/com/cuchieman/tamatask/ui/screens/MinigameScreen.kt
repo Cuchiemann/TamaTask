@@ -1,6 +1,7 @@
 package com.cuchieman.tamatask.ui.screens
 
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -10,6 +11,9 @@ import androidx.compose.animation.core.tween
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Checkbox
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -38,10 +42,16 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.res.imageResource
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
+import com.cuchieman.tamatask.R
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
@@ -147,12 +157,12 @@ fun MinigameScreen(onBack: () -> Unit, onShowBottomBar: (Boolean) -> Unit = {}) 
     // Build dig sites from all dinos
     val digSites = remember {
         val positions = listOf(
-            0.72f to 0.78f,  // Spinosaurus (desierto)
-            0.25f to 0.22f,  // Stegosaurus (bosque norte)
-            0.72f to 0.18f,  // Velociraptor (montanas)
-            0.15f to 0.55f,  // Triceratops (bosque oeste)
-            0.65f to 0.48f,  // Pteranodon (centro-este)
-            0.40f to 0.75f,  // T-Rex (lago sur)
+            0.22f to 0.60f,  // Spinosaurus (desierto izq)
+            0.22f to 0.28f,  // Stegosaurus (bosque izq)
+            0.65f to 0.33f,  // Velociraptor (pie de montaña)
+            0.50f to 0.15f,  // Triceratops (pie montaña)
+            0.43f to 0.87f,  // Pteranodon (abajo río)
+            0.50f to 0.72f,  // T-Rex (junto al río)
         )
         DinoCollection.all.mapIndexed { i, dino ->
             val (x, y) = positions.getOrElse(i) { (0.5f to 0.5f) }
@@ -209,39 +219,56 @@ private fun MapPhase(
     onSiteSelected: (DigSite) -> Unit
 ) {
     val textMeasurer = rememberTextMeasurer()
+    val mapTerrainSprite = ImageBitmap.imageResource(R.drawable.map_terrain)
+    val mapPinSprite = ImageBitmap.imageResource(R.drawable.map_pin)
     // Next dino to unlock (first locked in list order)
     val nextToUnlockId = digSites.firstOrNull { !it.dino.unlocked }?.dino?.id
+
+    // Debug: unlock all sites
+    var unlockAll by remember { mutableStateOf(false) }
+
+    // Pin levitation animation
+    val pinTransition = rememberInfiniteTransition(label = "pinFloat")
+    val pinFloatOffset by pinTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(3000, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pinFloat"
+    )
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF3E2E1A)),
+            .background(Color(0xFFD9BC9F)),
         contentAlignment = Alignment.Center
     ) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 16.dp, vertical = 32.dp),
+                .padding(horizontal = 8.dp, vertical = 8.dp),
             contentAlignment = Alignment.Center
         ) {
             Canvas(
                 modifier = Modifier
                     .fillMaxSize()
-                    .pointerInput(digSites, nextToUnlockId) {
+                    .pointerInput(digSites, nextToUnlockId, unlockAll) {
                         detectTapGestures { tapOffset ->
                             val w = size.width.toFloat()
                             val h = size.height.toFloat()
-                            val scrollMarginX = w * 0.08f
-                            val scrollMarginTop = w * 0.10f
-                            val scrollMarginBottom = w * 0.10f
+                            val scrollMarginX = 0f
+                            val scrollMarginTop = 0f
+                            val scrollMarginBottom = 0f
                             val mapW = w - scrollMarginX * 2
                             val mapH = h - scrollMarginTop - scrollMarginBottom
 
                             val pinTouchRadius = w * 0.06f
 
                             for (site in digSites) {
-                                // Only allow tapping unlocked sites and the next to unlock
-                                if (!site.dino.unlocked && site.dino.id != nextToUnlockId) continue
+                                // Only allow tapping unlocked sites and the next to unlock (unless unlockAll)
+                                if (!unlockAll && !site.dino.unlocked && site.dino.id != nextToUnlockId) continue
 
                                 val px = scrollMarginX + site.mapX * mapW
                                 val py = scrollMarginTop + site.mapY * mapH
@@ -260,48 +287,94 @@ private fun MapPhase(
                 val w = size.width
                 val h = size.height
 
-                drawParchmentScroll(w, h)
+                // Draw map filling the entire canvas
+                drawImage(
+                    image = mapTerrainSprite,
+                    srcOffset = IntOffset.Zero,
+                    srcSize = IntSize(mapTerrainSprite.width, mapTerrainSprite.height),
+                    dstOffset = IntOffset.Zero,
+                    dstSize = IntSize(w.toInt(), h.toInt()),
+                    filterQuality = FilterQuality.None
+                )
 
-                // Map area inside scroll
-                val marginX = w * 0.08f
-                val marginTop = w * 0.10f
-                val marginBottom = w * 0.10f
-                val mapW = w - marginX * 2
-                val mapH = h - marginTop - marginBottom
+                // Map area = full canvas (map has its own border)
+                val marginX = 0f
+                val marginTop = 0f
+                val marginBottom = 0f
+                val mapW = w
+                val mapH = h
 
-                clipRect(marginX, marginTop, marginX + mapW, marginTop + mapH) {
-                    drawMapTerrain(marginX, marginTop, mapW, mapH)
-                }
+                // (map already drawn above, filling entire canvas)
 
-                // Draw pins with names
-                digSites.forEach { site ->
+                // Draw pins with names (levitating)
+                val floatAmplitude = w * 0.018f // how far pins float up/down
+                digSites.forEachIndexed { index, site ->
                     val px = marginX + site.mapX * mapW
                     val py = marginTop + site.mapY * mapH
-                    val pinSize = w * 0.045f
-                    drawMapPin(px, py, pinSize)
+                    val pinSize = (w * 0.105f).toInt()
+
+                    // All pins float together in sync
+                    val floatY = sin(pinFloatOffset * Math.PI.toFloat()) * floatAmplitude
+
+                    drawImage(
+                        image = mapPinSprite,
+                        srcOffset = IntOffset.Zero,
+                        srcSize = IntSize(mapPinSprite.width, mapPinSprite.height),
+                        dstOffset = IntOffset(
+                            (px - pinSize / 2f).toInt(),
+                            (py - pinSize + floatY).toInt()
+                        ),
+                        dstSize = IntSize(pinSize, pinSize),
+                        filterQuality = FilterQuality.None
+                    )
 
                     // Label: unlocked/next → species name, rest → "???"
                     val isNext = site.dino.id == nextToUnlockId
                     val label = if (site.dino.unlocked || isNext) site.dino.species else "???"
-                    val nameStyle = TextStyle(
+                    val outlineStyle = TextStyle(
                         fontFamily = PixelFontFamily,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.Black,
                         textAlign = TextAlign.Center
                     )
+                    val nameStyle = outlineStyle.copy(color = Color.White)
                     val nameLayout = textMeasurer.measure(label, nameStyle)
-                    drawText(
-                        textLayoutResult = nameLayout,
-                        topLeft = Offset(
-                            px - nameLayout.size.width / 2f,
-                            py + pinSize * 1.1f
-                        )
-                    )
+                    val outlineLayout = textMeasurer.measure(label, outlineStyle)
+                    val textX = px - nameLayout.size.width / 2f
+                    val textY = py + pinSize * 0.15f
+                    // Draw black outline (4 directions)
+                    val o = 1.5f
+                    for ((dx, dy) in listOf(-o to 0f, o to 0f, 0f to -o, 0f to o)) {
+                        drawText(outlineLayout, topLeft = Offset(textX + dx, textY + dy))
+                    }
+                    // Draw white text on top
+                    drawText(nameLayout, topLeft = Offset(textX, textY))
                 }
             }
         }
 
+        // Debug: unlock all checkbox
+        Row(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "All",
+                style = TextStyle(
+                    fontFamily = PixelFontFamily,
+                    fontSize = 10.sp,
+                    color = Color.White
+                )
+            )
+            Checkbox(
+                checked = unlockAll,
+                onCheckedChange = { unlockAll = it },
+                modifier = Modifier.size(24.dp)
+            )
+        }
     }
 }
 
@@ -316,6 +389,19 @@ private fun SiteDetailPhase(
     onBack: () -> Unit
 ) {
     val textMeasurer = rememberTextMeasurer()
+    val mapPinSprite = ImageBitmap.imageResource(R.drawable.map_pin)
+
+    // Site terrain sprites mapped by dino index
+    val siteTerrainSprites = listOf(
+        ImageBitmap.imageResource(R.drawable.site_desert),        // 0: Spinosaurus
+        ImageBitmap.imageResource(R.drawable.site_forest),        // 1: Stegosaurus
+        ImageBitmap.imageResource(R.drawable.site_meadow),         // 2: Velociraptor (prado)
+        ImageBitmap.imageResource(R.drawable.site_forest_river),  // 3: Triceratops (bosque río)
+        ImageBitmap.imageResource(R.drawable.site_riverbank),     // 4: Pteranodon (cañón árido)
+        ImageBitmap.imageResource(R.drawable.site_clearing),      // 5: T-Rex (árido seco)
+    )
+    val siteIndex = DinoCollection.all.indexOfFirst { it.id == site.dino.id }.coerceIn(0, siteTerrainSprites.size - 1)
+    val siteSprite = siteTerrainSprites[siteIndex]
 
     Box(
         modifier = Modifier
@@ -344,22 +430,56 @@ private fun SiteDetailPhase(
                     val w = size.width
                     val h = size.height
 
-                    drawParchmentScroll(w, h)
+                    val borderWidth = w * 0.03f
 
-                    val marginX = w * 0.08f
-                    val marginTop = w * 0.10f
-                    val marginBottom = w * 0.10f
-                    val mapW = w - marginX * 2
-                    val mapH = h - marginTop - marginBottom
+                    // Draw site terrain sprite inside border area
+                    drawImage(
+                        image = siteSprite,
+                        srcOffset = IntOffset.Zero,
+                        srcSize = IntSize(siteSprite.width, siteSprite.height),
+                        dstOffset = IntOffset(borderWidth.toInt(), borderWidth.toInt()),
+                        dstSize = IntSize((w - borderWidth * 2).toInt(), (h - borderWidth * 2).toInt()),
+                        filterQuality = FilterQuality.None
+                    )
 
-                    clipRect(marginX, marginTop, marginX + mapW, marginTop + mapH) {
-                        drawZoomedTerrain(marginX, marginTop, mapW, mapH, site)
-                    }
+                    // Pixel art border frame
+                    val bc = Color(0xFF5C3A1E) // dark wood brown
+                    val bh = Color(0xFF8B6914) // highlight
+                    // Top
+                    drawRect(bc, Offset.Zero, Size(w, borderWidth))
+                    // Bottom
+                    drawRect(bc, Offset(0f, h - borderWidth), Size(w, borderWidth))
+                    // Left
+                    drawRect(bc, Offset.Zero, Size(borderWidth, h))
+                    // Right
+                    drawRect(bc, Offset(w - borderWidth, 0f), Size(borderWidth, h))
+                    // Inner highlight lines
+                    val ib = borderWidth * 0.4f
+                    drawRect(bh, Offset(borderWidth - ib, borderWidth - ib), Size(w - (borderWidth - ib) * 2, ib))
+                    drawRect(bh, Offset(borderWidth - ib, borderWidth - ib), Size(ib, h - (borderWidth - ib) * 2))
+                    // Corner accents (pixel squares)
+                    val cs = borderWidth * 0.8f
+                    val cd = Color(0xFF3E2510)
+                    drawRect(cd, Offset(0f, 0f), Size(cs, cs))
+                    drawRect(cd, Offset(w - cs, 0f), Size(cs, cs))
+                    drawRect(cd, Offset(0f, h - cs), Size(cs, cs))
+                    drawRect(cd, Offset(w - cs, h - cs), Size(cs, cs))
 
                     // Central pin with label
-                    val pinX = marginX + mapW * 0.5f
-                    val pinY = marginTop + mapH * 0.35f
-                    drawMapPin(pinX, pinY, w * 0.045f)
+                    val pinX = w * 0.5f
+                    val pinY = h * 0.35f
+                    val detailPinSize = (w * 0.07f).toInt()
+                    drawImage(
+                        image = mapPinSprite,
+                        srcOffset = IntOffset.Zero,
+                        srcSize = IntSize(mapPinSprite.width, mapPinSprite.height),
+                        dstOffset = IntOffset(
+                            (pinX - detailPinSize / 2f).toInt(),
+                            (pinY - detailPinSize).toInt()
+                        ),
+                        dstSize = IntSize(detailPinSize, detailPinSize),
+                        filterQuality = FilterQuality.None
+                    )
 
                     // Species name below pin
                     val nameStyle = TextStyle(
@@ -1041,48 +1161,7 @@ private fun DrawScope.drawMapTerrain(ox: Float, oy: Float, mapW: Float, mapH: Fl
     )
 }
 
-// ── Zoomed terrain for site detail ──
-private fun DrawScope.drawZoomedTerrain(ox: Float, oy: Float, mapW: Float, mapH: Float, site: DigSite) {
-    // Simple zoomed view with terrain
-    drawRect(MapGreen2, Offset(ox, oy), Size(mapW, mapH))
-
-    // Patches
-    val rng = Random(site.dino.id.hashCode())
-    for (i in 0..20) {
-        val px = ox + rng.nextFloat() * mapW
-        val py = oy + rng.nextFloat() * mapH
-        val patchSize = mapW * (0.1f + rng.nextFloat() * 0.2f)
-        val color = listOf(MapGreen1, MapGreen3, MapGreen2).random(rng)
-        drawOval(color, Offset(px - patchSize / 2, py - patchSize / 2), Size(patchSize, patchSize * 0.6f))
-    }
-
-    // Water feature (bottom area)
-    drawOval(
-        MapWater,
-        Offset(ox + mapW * 0.1f, oy + mapH * 0.75f),
-        Size(mapW * 0.80f, mapH * 0.22f)
-    )
-    drawOval(
-        MapWaterLight,
-        Offset(ox + mapW * 0.2f, oy + mapH * 0.78f),
-        Size(mapW * 0.50f, mapH * 0.12f)
-    )
-
-    // Path/trail leading to site
-    val trailColor = MapSand.copy(alpha = 0.6f)
-    drawLine(
-        trailColor,
-        Offset(ox, oy + mapH * 0.5f),
-        Offset(ox + mapW * 0.5f, oy + mapH * 0.35f),
-        strokeWidth = mapW * 0.03f
-    )
-    drawLine(
-        trailColor,
-        Offset(ox + mapW * 0.5f, oy + mapH * 0.35f),
-        Offset(ox + mapW, oy + mapH * 0.45f),
-        strokeWidth = mapW * 0.03f
-    )
-}
+// (drawZoomedTerrain removed — replaced by site terrain sprites)
 
 // ── Map pin ──
 private fun DrawScope.drawMapPin(x: Float, y: Float, size: Float) {
