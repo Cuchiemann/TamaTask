@@ -13,7 +13,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
-import androidx.compose.material3.Checkbox
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -69,6 +69,7 @@ import com.cuchieman.tamatask.ui.theme.TamaOrange
 import com.cuchieman.tamatask.ui.theme.TamaPink
 import com.cuchieman.tamatask.ui.theme.TamaRed
 import com.cuchieman.tamatask.ui.theme.TamaYellow
+import kotlinx.coroutines.delay
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
@@ -76,7 +77,7 @@ import kotlin.random.Random
 
 // ── Game phases ──
 private enum class MinigamePhase {
-    MAP, SITE_DETAIL, EXCAVATION, SUCCESS, FAILURE
+    MAP, SITE_DETAIL, EXCAVATION, FOSSIL_PUZZLE, SUCCESS, FAILURE
 }
 
 // ── Dig site data (position on map as fractions 0..1) ──
@@ -188,10 +189,15 @@ fun MinigameScreen(onBack: () -> Unit, onShowBottomBar: (Boolean) -> Unit = {}) 
 
         MinigamePhase.EXCAVATION -> ExcavationPhase(
             round = round,
-            hitCount = 5 + selectedSiteIndex,
-            tapTimeLimitMs = 10000L / (5 + selectedSiteIndex),
-            onComplete = { phase = MinigamePhase.SUCCESS },
+            hitCount = 5 + selectedSiteIndex * 2,
+            tapTimeLimitMs = 1500L - selectedSiteIndex * 120L,
+            onComplete = { phase = MinigamePhase.FOSSIL_PUZZLE },
             onTimeUp = { phase = MinigamePhase.FAILURE }
+        )
+
+        MinigamePhase.FOSSIL_PUZZLE -> FossilPuzzlePhase(
+            species = selectedSite!!.dino.species,
+            onComplete = { phase = MinigamePhase.SUCCESS }
         )
 
         MinigamePhase.SUCCESS -> SuccessPhase(
@@ -224,8 +230,9 @@ private fun MapPhase(
     // Next dino to unlock (first locked in list order)
     val nextToUnlockId = digSites.firstOrNull { !it.dino.unlocked }?.dino?.id
 
-    // Debug: unlock all sites
-    var unlockAll by remember { mutableStateOf(false) }
+    // Debug: unlock all sites (from persistent prefs)
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val unlockAll = com.cuchieman.tamatask.data.DebugPrefs.getUnlockAllSites(context)
 
     // Pin levitation animation
     val pinTransition = rememberInfiniteTransition(label = "pinFloat")
@@ -330,7 +337,7 @@ private fun MapPhase(
 
                     // Label: unlocked/next → species name, rest → "???"
                     val isNext = site.dino.id == nextToUnlockId
-                    val label = if (site.dino.unlocked || isNext) site.dino.species else "???"
+                    val label = if (unlockAll || site.dino.unlocked || isNext) site.dino.species else "???"
                     val outlineStyle = TextStyle(
                         fontFamily = PixelFontFamily,
                         fontSize = 10.sp,
@@ -354,27 +361,6 @@ private fun MapPhase(
             }
         }
 
-        // Debug: unlock all checkbox
-        Row(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                "All",
-                style = TextStyle(
-                    fontFamily = PixelFontFamily,
-                    fontSize = 10.sp,
-                    color = Color.White
-                )
-            )
-            Checkbox(
-                checked = unlockAll,
-                onCheckedChange = { unlockAll = it },
-                modifier = Modifier.size(24.dp)
-            )
-        }
     }
 }
 
@@ -389,7 +375,6 @@ private fun SiteDetailPhase(
     onBack: () -> Unit
 ) {
     val textMeasurer = rememberTextMeasurer()
-    val mapPinSprite = ImageBitmap.imageResource(R.drawable.map_pin)
 
     // Site terrain sprites mapped by dino index
     val siteTerrainSprites = listOf(
@@ -442,7 +427,7 @@ private fun SiteDetailPhase(
                         filterQuality = FilterQuality.None
                     )
 
-                    // Pixel art border frame
+                    // Pixel art border frame (procedural)
                     val bc = Color(0xFF5C3A1E) // dark wood brown
                     val bh = Color(0xFF8B6914) // highlight
                     // Top
@@ -465,23 +450,7 @@ private fun SiteDetailPhase(
                     drawRect(cd, Offset(0f, h - cs), Size(cs, cs))
                     drawRect(cd, Offset(w - cs, h - cs), Size(cs, cs))
 
-                    // Central pin with label
-                    val pinX = w * 0.5f
-                    val pinY = h * 0.35f
-                    val detailPinSize = (w * 0.07f).toInt()
-                    drawImage(
-                        image = mapPinSprite,
-                        srcOffset = IntOffset.Zero,
-                        srcSize = IntSize(mapPinSprite.width, mapPinSprite.height),
-                        dstOffset = IntOffset(
-                            (pinX - detailPinSize / 2f).toInt(),
-                            (pinY - detailPinSize).toInt()
-                        ),
-                        dstSize = IntSize(detailPinSize, detailPinSize),
-                        filterQuality = FilterQuality.None
-                    )
-
-                    // Species name below pin
+                    // Species name at top of frame
                     val nameStyle = TextStyle(
                         fontFamily = PixelFontFamily,
                         fontSize = 18.sp,
@@ -489,27 +458,17 @@ private fun SiteDetailPhase(
                         color = Color.White,
                         textAlign = TextAlign.Center
                     )
+                    val outlineStyle = nameStyle.copy(color = Color.Black)
                     val nameLayout = textMeasurer.measure(site.dino.species, nameStyle)
-                    // Background behind text
-                    drawRoundRect(
-                        color = Color.Black.copy(alpha = 0.5f),
-                        topLeft = Offset(
-                            pinX - nameLayout.size.width / 2f - 12f,
-                            pinY + w * 0.06f - 4f
-                        ),
-                        size = Size(
-                            nameLayout.size.width + 24f,
-                            nameLayout.size.height + 8f
-                        ),
-                        cornerRadius = CornerRadius(4f)
-                    )
-                    drawText(
-                        textLayoutResult = nameLayout,
-                        topLeft = Offset(
-                            pinX - nameLayout.size.width / 2f,
-                            pinY + w * 0.06f
-                        )
-                    )
+                    val outlineLayout = textMeasurer.measure(site.dino.species, outlineStyle)
+                    val textX = w / 2f - nameLayout.size.width / 2f
+                    val textY = borderWidth + borderWidth * 1.5f
+                    // Black outline (4 directions)
+                    val o = 2f
+                    for ((dx, dy) in listOf(-o to 0f, o to 0f, 0f to -o, 0f to o)) {
+                        drawText(outlineLayout, topLeft = Offset(textX + dx, textY + dy))
+                    }
+                    drawText(nameLayout, topLeft = Offset(textX, textY))
                 }
 
                 Spacer(modifier = Modifier.height(20.dp))
@@ -728,7 +687,334 @@ private fun ExcavationPhase(
 }
 
 // ═══════════════════════════════════════════════════════════════
-// PHASE 4: SUCCESS
+// PHASE 4: FOSSIL PUZZLE
+// ═══════════════════════════════════════════════════════════════
+
+// Each bone piece: drawing lambda + target position (fraction of canvas) + current drag offset
+private data class BonePiece(
+    val name: String,
+    val targetX: Float, // fraction 0..1
+    val targetY: Float,
+    val width: Float,   // fraction of canvas width
+    val height: Float   // fraction of canvas height
+)
+
+@Composable
+private fun FossilPuzzlePhase(
+    species: String,
+    onComplete: () -> Unit
+) {
+    val textMeasurer = rememberTextMeasurer()
+
+    // Define 6 bone pieces with their target positions (fractions of puzzle area)
+    val pieces = remember {
+        listOf(
+            BonePiece("Cráneo", 0.78f, 0.35f, 0.22f, 0.20f),
+            BonePiece("Cuello", 0.62f, 0.40f, 0.15f, 0.12f),
+            BonePiece("Columna", 0.38f, 0.42f, 0.35f, 0.10f),
+            BonePiece("Cola", 0.10f, 0.32f, 0.25f, 0.18f),
+            BonePiece("Patas delanteras", 0.58f, 0.62f, 0.14f, 0.25f),
+            BonePiece("Patas traseras", 0.28f, 0.65f, 0.16f, 0.28f)
+        )
+    }
+
+    // Scattered start positions (bottom area, randomized)
+    val startPositions = remember {
+        val rng = java.util.Random(species.hashCode().toLong())
+        pieces.map {
+            Offset(
+                0.1f + rng.nextFloat() * 0.8f,
+                0.75f + rng.nextFloat() * 0.15f
+            )
+        }
+    }
+
+    // Current positions as mutable state
+    val currentX = remember { mutableStateListOf(*startPositions.map { it.x }.toTypedArray()) }
+    val currentY = remember { mutableStateListOf(*startPositions.map { it.y }.toTypedArray()) }
+    val snapped = remember { mutableStateListOf(*Array(pieces.size) { false }) }
+    val draggingIndex = remember { mutableStateOf(-1) }
+
+    // Check completion
+    val allSnapped = snapped.all { it }
+    LaunchedEffect(allSnapped) {
+        if (allSnapped) {
+            kotlinx.coroutines.delay(600)
+            onComplete()
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Brush.verticalGradient(listOf(SkyTop, SkyBottom)))
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Spacer(modifier = Modifier.height(32.dp))
+
+            Text(
+                text = "Monta el fósil",
+                fontFamily = PixelFontFamily,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = species,
+                fontFamily = PixelFontFamily,
+                fontSize = 16.sp,
+                color = Color.White.copy(alpha = 0.7f)
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Canvas(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .pointerInput(Unit) {
+                        detectDragGestures(
+                            onDragStart = { offset ->
+                                val w = size.width.toFloat()
+                                val h = size.height.toFloat()
+                                // Find topmost non-snapped piece under finger
+                                val tapX = offset.x / w
+                                val tapY = offset.y / h
+                                var found = -1
+                                for (i in pieces.indices.reversed()) {
+                                    if (snapped[i]) continue
+                                    val px = currentX[i]
+                                    val py = currentY[i]
+                                    val pw = pieces[i].width
+                                    val ph = pieces[i].height
+                                    if (tapX in (px - pw / 2)..(px + pw / 2) &&
+                                        tapY in (py - ph / 2)..(py + ph / 2)
+                                    ) {
+                                        found = i
+                                        break
+                                    }
+                                }
+                                draggingIndex.value = found
+                            },
+                            onDrag = { change, dragAmount ->
+                                val idx = draggingIndex.value
+                                if (idx >= 0 && !snapped[idx]) {
+                                    change.consume()
+                                    currentX[idx] += dragAmount.x / size.width
+                                    currentY[idx] += dragAmount.y / size.height
+                                }
+                            },
+                            onDragEnd = {
+                                val idx = draggingIndex.value
+                                if (idx >= 0 && !snapped[idx]) {
+                                    val piece = pieces[idx]
+                                    val dx = currentX[idx] - piece.targetX
+                                    val dy = currentY[idx] - piece.targetY
+                                    val dist = sqrt(dx * dx + dy * dy)
+                                    if (dist < 0.08f) {
+                                        // Snap to target
+                                        currentX[idx] = piece.targetX
+                                        currentY[idx] = piece.targetY
+                                        snapped[idx] = true
+                                    }
+                                }
+                                draggingIndex.value = -1
+                            }
+                        )
+                    }
+            ) {
+                val w = size.width
+                val h = size.height
+
+                // Sand/ground background
+                drawRect(
+                    brush = Brush.verticalGradient(
+                        listOf(SandLight, SandDark),
+                        startY = 0f,
+                        endY = h
+                    ),
+                    topLeft = Offset.Zero,
+                    size = Size(w, h)
+                )
+
+                // Draw target silhouettes (guides)
+                for (piece in pieces) {
+                    val tx = piece.targetX * w
+                    val ty = piece.targetY * h
+                    val pw = piece.width * w
+                    val ph = piece.height * h
+                    drawRoundRect(
+                        color = Color.Black.copy(alpha = 0.15f),
+                        topLeft = Offset(tx - pw / 2, ty - ph / 2),
+                        size = Size(pw, ph),
+                        cornerRadius = CornerRadius(4f)
+                    )
+                }
+
+                // Draw bone pieces
+                for (i in pieces.indices) {
+                    val piece = pieces[i]
+                    val px = currentX[i] * w
+                    val py = currentY[i] * h
+                    val pw = piece.width * w
+                    val ph = piece.height * h
+                    val isSnapped = snapped[i]
+                    val isDragging = draggingIndex.value == i
+
+                    // Piece background
+                    val bgColor = when {
+                        isSnapped -> BoneLight.copy(alpha = 0.9f)
+                        isDragging -> BoneMid.copy(alpha = 0.95f)
+                        else -> BoneMid.copy(alpha = 0.85f)
+                    }
+                    drawRoundRect(
+                        color = bgColor,
+                        topLeft = Offset(px - pw / 2, py - ph / 2),
+                        size = Size(pw, ph),
+                        cornerRadius = CornerRadius(6f)
+                    )
+
+                    // Bone details inside piece
+                    drawBonePieceDetails(i, px, py, pw, ph)
+
+                    // Border
+                    val borderColor = if (isSnapped) Color(0xFF4CAF50) else BoneDark
+                    drawRoundRect(
+                        color = borderColor,
+                        topLeft = Offset(px - pw / 2, py - ph / 2),
+                        size = Size(pw, ph),
+                        cornerRadius = CornerRadius(6f),
+                        style = Stroke(width = if (isSnapped) 3f else 2f)
+                    )
+
+                    // Label
+                    val labelStyle = TextStyle(
+                        fontFamily = PixelFontFamily,
+                        fontSize = 9.sp,
+                        color = if (isSnapped) Color(0xFF4CAF50) else Color.White,
+                        textAlign = TextAlign.Center
+                    )
+                    val label = textMeasurer.measure(piece.name, labelStyle)
+                    drawText(
+                        label,
+                        topLeft = Offset(px - label.size.width / 2f, py - ph / 2 - label.size.height - 4f)
+                    )
+                }
+
+                // Progress counter
+                val placed = snapped.count { it }
+                val progressStyle = TextStyle(
+                    fontFamily = PixelFontFamily,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+                val progressText = "$placed / ${pieces.size}"
+                val progressLayout = textMeasurer.measure(progressText, progressStyle)
+                drawRoundRect(
+                    color = Color.Black.copy(alpha = 0.4f),
+                    topLeft = Offset(w - progressLayout.size.width - 24f, 8f),
+                    size = Size(progressLayout.size.width + 16f, progressLayout.size.height + 8f),
+                    cornerRadius = CornerRadius(4f)
+                )
+                drawText(
+                    progressLayout,
+                    topLeft = Offset(w - progressLayout.size.width - 16f, 12f)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+    }
+}
+
+private fun DrawScope.drawBonePieceDetails(index: Int, cx: Float, cy: Float, pw: Float, ph: Float) {
+    val blk = pw / 12f
+    when (index) {
+        0 -> { // Cráneo - skull shape
+            drawOval(BoneLight, Offset(cx - pw * 0.3f, cy - ph * 0.25f), Size(pw * 0.6f, ph * 0.45f))
+            drawCircle(BoneDark, blk * 1.2f, Offset(cx + pw * 0.05f, cy - ph * 0.08f)) // eye
+            drawCircle(Color(0xFF2A2420), blk * 0.7f, Offset(cx + pw * 0.05f, cy - ph * 0.08f))
+            // Jaw
+            drawRoundRect(BoneLight, Offset(cx - pw * 0.1f, cy + ph * 0.05f), Size(pw * 0.35f, ph * 0.15f), CornerRadius(blk * 0.3f))
+            // Teeth
+            for (t in 0..3) {
+                val tx = cx - pw * 0.05f + t * blk * 1.5f
+                drawRect(Color.White, Offset(tx, cy + ph * 0.15f), Size(blk * 0.7f, blk * 1f))
+            }
+        }
+        1 -> { // Cuello - vertebrae chain
+            for (v in 0..4) {
+                val vx = cx - pw * 0.35f + v * pw * 0.15f
+                drawCircle(BoneLight, blk * 1.1f, Offset(vx, cy))
+                drawCircle(BoneDark.copy(alpha = 0.3f), blk * 0.5f, Offset(vx, cy - blk * 0.4f))
+            }
+            drawLine(BoneLight, Offset(cx - pw * 0.35f, cy), Offset(cx + pw * 0.25f, cy), strokeWidth = blk * 0.8f)
+        }
+        2 -> { // Columna + costillas
+            // Spine
+            drawLine(BoneLight, Offset(cx - pw * 0.4f, cy), Offset(cx + pw * 0.4f, cy), strokeWidth = blk * 1.2f)
+            for (v in 0..8) {
+                val vx = cx - pw * 0.35f + v * pw * 0.085f
+                drawCircle(BoneLight, blk * 0.8f, Offset(vx, cy))
+            }
+            // Ribs
+            for (r in 1..5) {
+                val rx = cx - pw * 0.25f + r * pw * 0.10f
+                val ribLen = ph * (0.25f + 0.05f * (3f - kotlin.math.abs(r - 3f)))
+                val ribPath = Path().apply {
+                    moveTo(rx, cy)
+                    quadraticBezierTo(rx + blk, cy + ribLen * 0.6f, rx - blk * 0.3f, cy + ribLen)
+                }
+                drawPath(ribPath, BoneLight, style = Stroke(width = blk * 0.7f))
+            }
+        }
+        3 -> { // Cola
+            val tailPath = Path().apply {
+                moveTo(cx + pw * 0.3f, cy + ph * 0.1f)
+                quadraticBezierTo(cx, cy - ph * 0.1f, cx - pw * 0.3f, cy - ph * 0.2f)
+                quadraticBezierTo(cx - pw * 0.4f, cy - ph * 0.25f, cx - pw * 0.4f, cy - ph * 0.15f)
+            }
+            drawPath(tailPath, BoneLight, style = Stroke(width = blk * 1.1f))
+            for (t in 0..5) {
+                val frac = t / 5f
+                val tx = cx + pw * 0.3f - pw * 0.7f * frac
+                val ty = cy + ph * 0.1f - ph * 0.35f * frac + ph * 0.1f * sin(frac * 3f)
+                drawCircle(BoneLight, blk * (0.9f - frac * 0.15f), Offset(tx, ty))
+            }
+        }
+        4 -> { // Patas delanteras
+            // Two thin legs
+            for (side in listOf(-1f, 1f)) {
+                val lx = cx + side * pw * 0.15f
+                drawLine(BoneLight, Offset(lx, cy - ph * 0.3f), Offset(lx - blk * side, cy + ph * 0.1f), strokeWidth = blk * 0.9f)
+                drawLine(BoneLight, Offset(lx - blk * side, cy + ph * 0.1f), Offset(lx + blk * side * 0.5f, cy + ph * 0.35f), strokeWidth = blk * 0.8f)
+                // Foot
+                drawLine(BoneLight, Offset(lx + blk * side * 0.5f, cy + ph * 0.35f), Offset(lx + blk * 2f * side, cy + ph * 0.38f), strokeWidth = blk * 0.6f)
+            }
+        }
+        5 -> { // Patas traseras (bigger)
+            for (side in listOf(-1f, 1f)) {
+                val lx = cx + side * pw * 0.2f
+                drawLine(BoneLight, Offset(lx, cy - ph * 0.3f), Offset(lx + blk * side, cy + ph * 0.05f), strokeWidth = blk * 1.1f)
+                drawLine(BoneLight, Offset(lx + blk * side, cy + ph * 0.05f), Offset(lx - blk * side, cy + ph * 0.3f), strokeWidth = blk * 1f)
+                // Foot with toes
+                drawLine(BoneLight, Offset(lx - blk * side, cy + ph * 0.3f), Offset(lx - blk * 2.5f * side, cy + ph * 0.33f), strokeWidth = blk * 0.6f)
+                drawLine(BoneLight, Offset(lx - blk * side, cy + ph * 0.3f), Offset(lx + blk * side, cy + ph * 0.35f), strokeWidth = blk * 0.6f)
+            }
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PHASE 5: SUCCESS
 // ═══════════════════════════════════════════════════════════════
 
 @Composable

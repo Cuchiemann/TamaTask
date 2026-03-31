@@ -72,7 +72,7 @@ import androidx.compose.ui.unit.sp
 import com.cuchieman.tamatask.data.model.DinoCollection
 import com.cuchieman.tamatask.data.model.DinoSpec
 import com.cuchieman.tamatask.ui.components.PixelNatureBackground
-import com.cuchieman.tamatask.ui.components.PixelSpinosaurus
+import com.cuchieman.tamatask.ui.components.PixelDino
 import com.cuchieman.tamatask.ui.theme.PixelFontFamily
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -97,8 +97,11 @@ private const val MAX_IDLE_MS = 6000L
 
 // World-space X boundaries (fraction of panorama, 0..1)
 // Keep away from edges so camera can always keep dino fully on screen
-private const val X_MIN = 0.15f
-private const val X_MAX = 0.85f
+// X range varies with Y — narrower at top, wider at bottom
+private const val X_MIN_TOP = 0.40f   // narrow at top (deep water)
+private const val X_MAX_TOP = 0.60f
+private const val X_MIN_BOT = 0.10f   // wide at bottom (shore)
+private const val X_MAX_BOT = 0.90f
 
 // Panorama ratio — must match PixelNatureBackground.PANORAMA_RATIO
 private const val PANORAMA_RATIO = 3.5f
@@ -115,16 +118,20 @@ fun PetScreen() {
     var isWalking by remember { mutableStateOf(false) }
     var facingLeft by remember { mutableStateOf(false) }
 
+    // Debug prefs
+    val context = LocalContext.current
+    val unlockAllDinos = com.cuchieman.tamatask.data.DebugPrefs.getUnlockAllDinos(context)
+
     // Dino collection — unlocked first
     val dinos = remember { DinoCollection.sorted }
     val pagerState = rememberPagerState(initialPage = 0) { dinos.size }
     var selectedDino by remember { mutableStateOf(dinos.first()) }
 
-    // Update selected dino when pager changes (only if unlocked)
-    LaunchedEffect(pagerState) {
+    // Update selected dino when pager changes (unlocked or debug mode)
+    LaunchedEffect(pagerState, unlockAllDinos) {
         snapshotFlow { pagerState.currentPage }.collect { page ->
             val dino = dinos[page]
-            if (dino.unlocked) {
+            if (dino.unlocked || unlockAllDinos) {
                 selectedDino = dino
             }
         }
@@ -136,25 +143,33 @@ fun PetScreen() {
             isWalking = false
             delay(Random.nextLong(MIN_IDLE_MS, MAX_IDLE_MS))
 
-            val targetX = Random.nextFloat() * (X_MAX - X_MIN) + X_MIN
             val targetY = Random.nextFloat() * (Y_MAX - Y_MIN) + Y_MIN
+            // X range narrows toward top, widens toward bottom
+            val yFrac = (targetY - Y_MIN) / (Y_MAX - Y_MIN) // 0=top, 1=bottom
+            val xMin = X_MIN_TOP + (X_MIN_BOT - X_MIN_TOP) * yFrac
+            val xMax = X_MAX_TOP + (X_MAX_BOT - X_MAX_TOP) * yFrac
+            val targetX = Random.nextFloat() * (xMax - xMin) + xMin
+
+            // Stego: only horizontal movement, keep current Y
+            val finalY = if (selectedDino.id == "stego") dinoY.value else targetY
 
             val dx = abs(targetX - dinoX.value)
-            val dy = abs(targetY - dinoY.value)
+            val dy = abs(finalY - dinoY.value)
             val distance = sqrt(dx * dx + dy * dy)
             if (distance < 0.05f) continue
 
             facingLeft = targetX > dinoX.value
             isWalking = true
 
-            val durationMs = (distance / WALK_SPEED * 1000f).toInt().coerceIn(500, 8000)
+            val speed = if (selectedDino.id == "stego") WALK_SPEED * 0.25f else WALK_SPEED
+            val durationMs = (distance / speed * 1000f).toInt().coerceIn(500, 8000)
 
             coroutineScope {
                 launch {
                     dinoX.animateTo(targetX, tween(durationMs, easing = LinearEasing))
                 }
                 launch {
-                    dinoY.animateTo(targetY, tween(durationMs, easing = LinearEasing))
+                    dinoY.animateTo(finalY, tween(durationMs, easing = LinearEasing))
                 }
             }
         }
@@ -213,12 +228,30 @@ fun PetScreen() {
             label = "foamWave"
         )
 
-        // Background
-        PixelNatureBackground(
-            modifier = Modifier.fillMaxSize(),
-            scrollOffset = bgScroll,
-            dinoFeetScreenFrac = dinoFeetFrac
-        )
+        // Background — changes per habitat
+        if (selectedDino.id == "spino" || selectedDino.id == "stego") {
+            // Mangrove habitat (full implementation)
+            PixelNatureBackground(
+                modifier = Modifier.fillMaxSize(),
+                scrollOffset = bgScroll,
+                dinoFeetScreenFrac = dinoFeetFrac
+            )
+        } else {
+            // Other habitats — gradient placeholder
+            val habitatColors = when (selectedDino.id) {
+                "stego" -> listOf(Color(0xFF87CEEB), Color(0xFF228B22), Color(0xFF1B5E20)) // forest
+                "raptor" -> listOf(Color(0xFF87CEEB), Color(0xFF7CFC00), Color(0xFF4CAF50)) // meadow
+                "trike" -> listOf(Color(0xFF6BB3D9), Color(0xFF808080), Color(0xFF5D4037)) // mountain
+                "ptera" -> listOf(Color(0xFFFFB74D), Color(0xFFC19A6B), Color(0xFF8D6E63)) // canyon
+                "trex" -> listOf(Color(0xFFE0C97F), Color(0xFFBFA76A), Color(0xFF8B7355)) // arid
+                else -> listOf(Color(0xFF87CEEB), Color(0xFF4CAF50), Color(0xFF2E7D32))
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Brush.verticalGradient(habitatColors))
+            )
+        }
 
         // Pet name label — shows selected dino's species
         Text(
@@ -285,20 +318,25 @@ fun PetScreen() {
                     }
                 )
         ) {
-            PixelSpinosaurus(
-                modifier = Modifier.align(Alignment.Center),
-                isWalking = isWalking,
-                facingLeft = facingLeft
-            )
+            if (selectedDino.idleStripRes != null) {
+                PixelDino(
+                    dino = selectedDino,
+                    modifier = Modifier.align(Alignment.Center),
+                    isWalking = isWalking,
+                    facingLeft = facingLeft
+                )
+            }
         }
 
-        // Foreground vegetation
-        PixelNatureBackground(
-            modifier = Modifier.fillMaxSize(),
-            scrollOffset = bgScroll,
-            foregroundOnly = true,
-            dinoFeetScreenFrac = dinoFeetFrac
-        )
+        // Foreground vegetation (only for mangrove habitat)
+        if (selectedDino.id == "spino" || selectedDino.id == "stego") {
+            PixelNatureBackground(
+                modifier = Modifier.fillMaxSize(),
+                scrollOffset = bgScroll,
+                foregroundOnly = true,
+                dinoFeetScreenFrac = dinoFeetFrac
+            )
+        }
 
         // ══════════════════════════════════════════
         // DINO CAROUSEL — bottom, floating over terrain
@@ -319,7 +357,10 @@ fun PetScreen() {
             ) { page ->
                 val dino = dinos[page]
                 val isSelected = page == pagerState.currentPage
-                DinoCarouselCard(dino = dino, isSelected = isSelected)
+                DinoCarouselCard(
+                    dino = if (unlockAllDinos) dino.copy(unlocked = true) else dino,
+                    isSelected = isSelected
+                )
             }
 
             // Page indicator dots
@@ -352,22 +393,35 @@ fun PetScreen() {
 private fun DinoCarouselCard(dino: DinoSpec, isSelected: Boolean) {
     val context = LocalContext.current
 
-    // Load thumbnail: first frame of idle strip (if unlocked and has sprites)
+    // Load thumbnail: dedicated thumb image, or first frame of idle sprite sheet
     val thumbnail: ImageBitmap? = remember(dino.id) {
-        if (dino.unlocked && dino.idleStripRes != null) {
-            val options = BitmapFactory.Options().apply { inScaled = false }
+        if (!dino.unlocked) return@remember null
+        val options = BitmapFactory.Options().apply { inScaled = false }
+        // Try dedicated thumbnail first
+        if (dino.thumbRes != null) {
+            val resId = context.resources.getIdentifier(dino.thumbRes, "drawable", context.packageName)
+            if (resId != 0) {
+                val bmp = BitmapFactory.decodeResource(context.resources, resId, options)
+                if (bmp != null) return@remember bmp.asImageBitmap()
+            }
+        }
+        // Fallback: first frame of idle strip
+        if (dino.idleStripRes != null) {
             val resId = context.resources.getIdentifier(dino.idleStripRes, "drawable", context.packageName)
             if (resId != 0) {
                 val strip = BitmapFactory.decodeResource(context.resources, resId, options)
                 if (strip != null) {
-                    // Extract first frame (717px wide for spino)
-                    val frameW = strip.width / 36  // assume 36 frames
-                    val frame = Bitmap.createBitmap(strip, 0, 0, frameW, strip.height)
+                    val cols = if (strip.height > strip.width / 2) 6 else 36
+                    val rows = if (cols == 6) 6 else 1
+                    val frameW = strip.width / cols
+                    val frameH = strip.height / rows
+                    val frame = Bitmap.createBitmap(strip, 0, 0, frameW, frameH)
                     strip.recycle()
-                    frame.asImageBitmap()
-                } else null
-            } else null
-        } else null
+                    return@remember frame.asImageBitmap()
+                }
+            }
+        }
+        null
     }
 
     Box(

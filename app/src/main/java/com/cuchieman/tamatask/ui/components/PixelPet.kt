@@ -16,65 +16,73 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import com.cuchieman.tamatask.data.model.DinoSpec
 import kotlinx.coroutines.delay
 
-// ── Idle animation ──
-private const val IDLE_FRAMES = 36
-private const val IDLE_FRAME_W = 717   // px per frame in strip
-private const val IDLE_FRAME_H = 252   // px height
-private const val IDLE_DELAY_MS = 200L // ~5 FPS
+// ── Per-dino sprite config ──
+private data class SpriteConfig(
+    val idleFrames: Int,
+    val idleFrameW: Int,
+    val idleFrameH: Int,
+    val idleCols: Int,        // columns in grid (1 = horizontal strip)
+    val walkFrames: Int,
+    val walkFrameW: Int,
+    val walkFrameH: Int,
+    val walkCols: Int,
+    val idleDelayMs: Long,
+    val walkDelayMs: Long,
+    val displayH: Dp
+)
 
-// ── Walk animation ──
-private const val WALK_FRAMES = 36
-private const val WALK_FRAME_W = 694   // px per frame in strip
-private const val WALK_FRAME_H = 229   // px height
-private const val WALK_DELAY_MS = 100L // ~10 FPS — snappier walk cycle
-
-// Display sizes (dp) — unified height so idle/walk dino looks same size
-// Both use 110dp height; width preserves aspect ratio
-// Idle: 717×252 → 313×110 dp (0.4365 dp/px)
-// Walk: 694×229 → 333×110 dp (0.4803 dp/px)
-private val IDLE_DISPLAY_W = 313.dp
-private val IDLE_DISPLAY_H = 110.dp
-private val WALK_DISPLAY_W = 333.dp
-private val WALK_DISPLAY_H = 110.dp
+private val DINO_CONFIGS = mapOf(
+    "spino" to SpriteConfig(
+        idleFrames = 36, idleFrameW = 717, idleFrameH = 252, idleCols = 36,
+        walkFrames = 36, walkFrameW = 694, walkFrameH = 229, walkCols = 36,
+        idleDelayMs = 200L, walkDelayMs = 100L, displayH = 110.dp
+    ),
+    "stego" to SpriteConfig(
+        idleFrames = 36, idleFrameW = 711, idleFrameH = 294, idleCols = 6,
+        walkFrames = 36, walkFrameW = 763, walkFrameH = 300, walkCols = 6,
+        idleDelayMs = 140L, walkDelayMs = 140L, displayH = 85.dp
+    )
+)
 
 /**
- * Animated pixel art Spinosaurus mirabilis.
- * Supports idle and walk animations with directional flipping.
- *
- * @param isWalking true = walk animation, false = idle animation
- * @param facingLeft true = sprite flipped horizontally (walking left)
+ * Generic animated pixel art dinosaur.
+ * Backwards compatible — PixelSpinosaurus calls this with spino dino.
  */
 @Composable
-fun PixelSpinosaurus(
+fun PixelDino(
+    dino: DinoSpec,
     modifier: Modifier = Modifier,
     isWalking: Boolean = false,
     facingLeft: Boolean = false
 ) {
     val context = LocalContext.current
+    val config = DINO_CONFIGS[dino.id] ?: return
 
-    // Load idle spritestrip
-    val idleFrames = remember {
-        loadSpriteFrames(context, "spino_idle_strip", IDLE_FRAMES, IDLE_FRAME_W, IDLE_FRAME_H)
+    val idleFrames = remember(dino.id) {
+        dino.idleStripRes?.let {
+            loadSpriteGrid(context, it, config.idleFrames, config.idleFrameW, config.idleFrameH, config.idleCols)
+        } ?: emptyList()
     }
 
-    // Load walk spritestrip
-    val walkFrames = remember {
-        loadSpriteFrames(context, "spino_walk_strip", WALK_FRAMES, WALK_FRAME_W, WALK_FRAME_H)
+    val walkFrames = remember(dino.id) {
+        dino.walkStripRes?.let {
+            loadSpriteGrid(context, it, config.walkFrames, config.walkFrameW, config.walkFrameH, config.walkCols)
+        } ?: emptyList()
     }
 
     val activeFrames = if (isWalking && walkFrames.isNotEmpty()) walkFrames else idleFrames
-    val activeDelay = if (isWalking) WALK_DELAY_MS else IDLE_DELAY_MS
+    val activeDelay = if (isWalking) config.walkDelayMs else config.idleDelayMs
 
-    // Current frame index — reset when switching animation
-    var currentFrame by remember(isWalking) { mutableIntStateOf(0) }
+    var currentFrame by remember(isWalking, dino.id) { mutableIntStateOf(0) }
 
-    // Animate through frames
-    LaunchedEffect(isWalking, activeFrames) {
+    LaunchedEffect(isWalking, dino.id, activeFrames) {
         if (activeFrames.isNotEmpty()) {
             while (true) {
                 delay(activeDelay)
@@ -83,39 +91,55 @@ fun PixelSpinosaurus(
         }
     }
 
-    // Display size depends on animation
-    val displayW = if (isWalking && walkFrames.isNotEmpty()) WALK_DISPLAY_W else IDLE_DISPLAY_W
-    val displayH = if (isWalking && walkFrames.isNotEmpty()) WALK_DISPLAY_H else IDLE_DISPLAY_H
-
-    // Draw current frame
     if (activeFrames.isNotEmpty()) {
+        val frame = activeFrames[currentFrame]
+        // Calculate display width preserving aspect ratio
+        val frameW = if (isWalking && walkFrames.isNotEmpty()) config.walkFrameW else config.idleFrameW
+        val frameH = if (isWalking && walkFrames.isNotEmpty()) config.walkFrameH else config.idleFrameH
+        val aspectRatio = frameW.toFloat() / frameH
+        val displayW = config.displayH * aspectRatio
+
         Image(
-            bitmap = activeFrames[currentFrame],
-            contentDescription = "Spinosaurus",
+            bitmap = frame,
+            contentDescription = dino.species,
             modifier = modifier
                 .width(displayW)
-                .height(displayH)
-                // Flip horizontally when facing left
+                .height(config.displayH)
                 .scale(scaleX = if (facingLeft) -1f else 1f, scaleY = 1f),
             contentScale = ContentScale.FillBounds,
-            filterQuality = FilterQuality.None // Nearest-neighbor for crisp pixels
+            filterQuality = FilterQuality.None
         )
     }
 }
 
 /**
- * Load a horizontal spritestrip from drawable resources and split into individual frames.
+ * Backwards compatible wrapper for Spinosaurus.
  */
-private fun loadSpriteFrames(
+@Composable
+fun PixelSpinosaurus(
+    modifier: Modifier = Modifier,
+    isWalking: Boolean = false,
+    facingLeft: Boolean = false
+) {
+    val spino = remember {
+        com.cuchieman.tamatask.data.model.DinoCollection.all.first { it.id == "spino" }
+    }
+    PixelDino(dino = spino, modifier = modifier, isWalking = isWalking, facingLeft = facingLeft)
+}
+
+/**
+ * Load sprite frames from a grid or horizontal strip.
+ * @param cols number of columns in the grid (use totalFrames for horizontal strip)
+ */
+private fun loadSpriteGrid(
     context: android.content.Context,
     resourceName: String,
     totalFrames: Int,
     frameWidth: Int,
-    frameHeight: Int
+    frameHeight: Int,
+    cols: Int
 ): List<ImageBitmap> {
-    val options = BitmapFactory.Options().apply {
-        inScaled = false
-    }
+    val options = BitmapFactory.Options().apply { inScaled = false }
     val resId = context.resources.getIdentifier(resourceName, "drawable", context.packageName)
     if (resId == 0) return emptyList()
 
@@ -123,9 +147,12 @@ private fun loadSpriteFrames(
 
     val frameList = mutableListOf<ImageBitmap>()
     for (i in 0 until totalFrames) {
-        val x = i * frameWidth
-        if (x + frameWidth <= strip.width) {
-            val frameBmp = Bitmap.createBitmap(strip, x, 0, frameWidth, frameHeight)
+        val col = i % cols
+        val row = i / cols
+        val x = col * frameWidth
+        val y = row * frameHeight
+        if (x + frameWidth <= strip.width && y + frameHeight <= strip.height) {
+            val frameBmp = Bitmap.createBitmap(strip, x, y, frameWidth, frameHeight)
             frameList.add(frameBmp.asImageBitmap())
         }
     }
